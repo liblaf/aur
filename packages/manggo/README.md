@@ -1,27 +1,28 @@
 # Manggo for Arch Linux
 
-[![Validate and update Manggo](https://github.com/liblaf/aur-manggo/actions/workflows/update.yml/badge.svg)](https://github.com/liblaf/aur-manggo/actions/workflows/update.yml)
+[![Validate and update AUR packages](https://github.com/liblaf/aur/actions/workflows/packages.yml/badge.svg)](https://github.com/liblaf/aur/actions/workflows/packages.yml)
 
 [Manggo](https://manggo.pylogmon.cn/) is a desktop translation and screenshot OCR
-assistant. This repository packages its official Debian downloads for Arch Linux.
-It contains packaging code, release maintenance tools, and validation notes.
+assistant. This directory packages its official Debian downloads for Arch Linux.
+It contains the recipe, release maintenance tools, and validation notes.
 
 Architectures: **x86_64** and **aarch64**. See the AUR listing for the current version.
 Published as [manggo on the AUR](https://aur.archlinux.org/packages/manggo),
 maintained by `liblaf`.
 
-Source: [liblaf/aur-manggo](https://github.com/liblaf/aur-manggo).
-Local project: `~/Projects/liblaf/aur-manggo`.
+Source: [liblaf/aur, packages/manggo](https://github.com/liblaf/aur/tree/main/packages/manggo).
+Shared automation and authentication: [repository README](../../README.md).
 
 ---
 
 ## Install locally
 
-Install Arch's build tools, then run these commands from this directory as your
-normal user:
+Install Arch's build tools, then run these commands from the repository root as
+your normal user. The remaining local commands on this page use this package directory.
 
 ```bash
 sudo pacman -S --needed base-devel
+cd packages/manggo
 makepkg --syncdeps --install
 ```
 
@@ -95,94 +96,47 @@ runtime support there.
 
 ## Automated updates
 
-[GitHub Actions](https://github.com/liblaf/aur-manggo/actions/workflows/update.yml)
-checks the official download page daily at 09:17 Asia/Shanghai (01:17 UTC).
-Unchanged releases skip downloads and builds, except for a compatibility recheck
-every 28 days. A new release goes through these steps:
+The shared [package workflow](https://github.com/liblaf/aur/actions/workflows/packages.yml)
+checks upstream releases and tracks compatibility checks in this directory's
+`automation-validation.json`. See the [repository README](../../README.md) for
+scheduling, manual runs, and the shared AUR publishing key.
+
+Manggo validation performs these steps:
 
 1. Require matching x86_64/ARM64 Debian releases and verify their control metadata.
 2. Update version/checksums and regenerate `.SRCINFO`.
 3. Run updater and publisher regression tests in a disposable Arch container.
 4. Build and install x86_64, check dependencies and package metadata, and launch
    the application in Xvfb. Also validate ARM64 repackaging.
-5. Upload only the validated `PKGBUILD`, `.SRCINFO`, and integrity manifest.
-6. In a separate job, verify the candidate against the trusted recipe, publish
-   those two metadata files to AUR, then make a verified GitHub commit with the
-   metadata and a validation record.
+5. Upload the validated `PKGBUILD`, `.SRCINFO`, and integrity manifest.
 
-Downloaded vendor code runs without the AUR key or a GitHub token with write
-access. Publication is restricted to this repository's `main` branch and scheduled
-or manual runs. The AUR publishing key is an environment secret in `aur-publish`,
-whose deployment policy permits only `main`. Concurrent update runs are serialized. Unexpected recipe changes,
-upstream formats, missing dependencies, and divergent AUR edits stop publication.
+The integration job verifies each candidate against its trusted recipe, publishes
+its metadata to the corresponding AUR repository, and prepares its validation
+record. One verified GitHub commit records the selected packages' changes.
+Downloaded vendor code runs in a separate job without publishing credentials.
 
-If AUR succeeds but the GitHub push fails, the next run can complete the GitHub
-commit without republishing AUR. AUR/GitHub differences also trigger validation
-when the upstream version is unchanged, allowing interrupted publication to retry.
+The Manggo publisher rejects changes outside release fields, divergent AUR
+metadata, and a moved GitHub `main`. Its working tree check covers this package
+directory so the shared integration job can prepare other packages before the
+GitHub commit. If AUR publication succeeds and GitHub publication fails, a later
+run can finish recording the update without publishing it to AUR again.
 
-After publishing to AUR, the publisher prepares the validated metadata and report
-in the GitHub checkout. The workflow uses
-[`suzuki-shunsuke/commit-action`](https://github.com/suzuki-shunsuke/commit-action)
-with `GITHUB_TOKEN` and `contents: write` to create a verified commit on
-a temporary branch based on the validated source commit. Only `PKGBUILD`,
-`.SRCINFO`, and `automation-validation.json` can be included. After verifying the
-signature, the token advances `main` by fast-forward and removes the temporary
-branch. Concurrent changes to `main` stop publication. Branch rules require
-verified signatures and reject deletion, branch creation, and force pushes on
-`main`. Pull requests are optional.
+`aur-state.json` records the last known AUR commit and both file hashes. The
+publisher verifies that complete baseline before updating an older AUR recipe.
+Recovery accepts one direct child with exactly the candidate's files; other
+co-maintainer changes require updating the baseline after review. Successful
+publication records the resulting AUR commit and hashes for the next run.
 
-The generated `automation-validation.json` records the validated version, source
-commit, timestamp, and Actions run. Successful monthly rechecks keep the public
-repository active between releases. Commits made with `GITHUB_TOKEN` do not
-trigger another workflow run; the originating scheduled/manual run has already
-validated the package.
-
-Run the complete workflow manually:
+Run the shared workflow manually from any directory:
 
 ```bash
-gh workflow run update.yml --repo liblaf/aur-manggo -f validate_current=true
+gh workflow run packages.yml --repo liblaf/aur -f validate_current=true
 ```
 
-Pushes and pull requests also run validation, with publication disabled. Failure
-details are available on the Actions page. GitHub schedules can be delayed; public
-repository schedules may be disabled after 60 days without repository activity
-if compatibility checks or publication have stopped succeeding.
-If necessary, re-enable this workflow with `gh workflow enable update.yml --repo
-liblaf/aur-manggo`. See [GitHub's schedule documentation](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#schedule).
-
-## Automation key identity and recovery
-
-The workflow uses a dedicated Ed25519 key registered to the AUR account `liblaf`.
-Its private half is stored as the encrypted `aur-publish` environment secret
-`AUR_SSH_PRIVATE_KEY`. Its public half is tracked in
-[config/aur-actions-key.pub](https://github.com/liblaf/aur-manggo/blob/main/config/aur-actions-key.pub).
-
-| Item | Value |
-| --- | --- |
-| Purpose | GitHub Actions publishing `manggo` to AUR |
-| AUR account | `liblaf` |
-| GitHub repository | `liblaf/aur-manggo` |
-| Secret | `AUR_SSH_PRIVATE_KEY` |
-| Public-key fingerprint | `SHA256:E4XWAN4OEnFRSRd1S6drJS543lwVtninVPxieehc4gQ` |
-
-aurweb removes comments, but this does not change the key or its fingerprint:
-
-```bash
-ssh-keygen -lf config/aur-actions-key.pub
-```
-
-To locate the entry in AUR settings, compare the second field (the long key data)
-against the tracked public key. You can also copy the AUR public-key list into a
-temporary file and run `ssh-keygen -lf` on that file to compare fingerprints.
-
-GitHub secrets cannot be read back. If the private key is lost or needs rotating,
-generate a new dedicated pair, register the new public key in AUR, update the
-GitHub secret, and run the workflow successfully before removing the old AUR key.
-Commit the new public file and fingerprint to keep the mapping current. Keep the
-personal SSH key separate; no private key belongs in Git history.
-
-GitHub publication uses the workflow's temporary `GITHUB_TOKEN`; it requires no
-additional SSH key or private-key secret.
+Pushes and pull requests validate packages. Once shared publication is activated,
+scheduled and manual runs on `main` can publish them. The validation record
+contains the version, source commit, timestamp, and Actions run. Historical
+package checks remain in [VALIDATION.md](VALIDATION.md).
 
 ## Publish updates to the AUR
 
@@ -201,11 +155,9 @@ git -C "$aur_dir" commit -m 'Update Manggo packaging'
 GIT_LFS_SKIP_PUSH=1 git -C "$aur_dir" push origin HEAD:master
 ```
 
-You can reuse `~/Projects/liblaf/aur-manggo-aur` instead of cloning again.
-Keep this maintenance repository separately. The push skips Git LFS because the
-AUR repository contains only text metadata; no global Git configuration is changed.
-Do not commit downloaded
-Debian files, built Arch packages, or build directories.
+Reuse a dedicated AUR checkout when maintaining releases locally. The push skips
+Git LFS because the AUR repository contains only text metadata. Keep downloaded
+Debian files, built Arch packages, and build directories out of Git.
 
 ## License
 

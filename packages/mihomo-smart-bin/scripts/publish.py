@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: MIT
 """Publish inert, validated packaging metadata to AUR and prepare GitHub files."""
 from __future__ import annotations
 
@@ -14,7 +15,7 @@ import subprocess
 import sys
 
 ROOT = Path(__file__).resolve().parents[1]
-REPOSITORY = "liblaf/aur-mihomo-smart-bin"
+REPOSITORY = "liblaf/aur"
 FILES = ("PKGBUILD", ".SRCINFO", "mihomo-smart-bin.install", "LICENSE")
 VERSION = re.compile(r"(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)"
                      r"\.alpha\.smart\.r([1-9][0-9]*)\.g([0-9a-f]{7,40})\Z")
@@ -209,7 +210,7 @@ def publish(candidate: Path, aur: Path, branch: str = "main") -> None:
     manifest = validate(candidate)
     if branch != "main" or git(ROOT, "branch", "--show-current") != "main":
         raise PublishError("publication requires main")
-    if git(ROOT, "status", "--porcelain", "--untracked-files=all"):
+    if git(ROOT, "status", "--porcelain", "--untracked-files=all", "--", "."):
         raise PublishError("GitHub checkout is dirty")
     if os.environ.get("GITHUB_REPOSITORY") != REPOSITORY:
         raise PublishError("publication requires trusted GitHub repository")

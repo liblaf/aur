@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# SPDX-License-Identifier: 0BSD
+# SPDX-License-Identifier: MIT
 # Run only in a disposable Arch container without publishing credentials.
 set -euo pipefail
 
@@ -9,11 +9,10 @@ pacman -Syu --needed --noconfirm base-devel git python namcap shellcheck > /tmp/
 }
 useradd --create-home builder
 project=/home/builder/project
-install -d "$project/scripts" "$project/tests" "$project/.github/workflows"
+install -d "$project/scripts" "$project/tests"
 cp /workspace/PKGBUILD /workspace/.SRCINFO /workspace/mihomo-smart-bin.install /workspace/LICENSE /workspace/aur-state.json "$project/"
 cp /workspace/scripts/*.py "$project/scripts/"
 cp /workspace/tests/*.py "$project/tests/"
-cp /workspace/.github/workflows/update.yml "$project/.github/workflows/"
 chown -R builder:builder "$project"
 as_builder() {
   runuser -u builder -- bash -c 'cd /home/builder/project && exec "$@"' bash "$@"

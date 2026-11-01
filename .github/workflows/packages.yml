@@ -1,0 +1,192 @@
+name: Validate and update AUR packages
+
+on:
+  schedule:
+    # UTC; 02:37, 08:37, 14:37, and 20:37 Asia/Shanghai.
+    - cron: '37 */6 * * *'
+  workflow_dispatch:
+    inputs:
+      validate_current:
+        description: Validate and synchronize the current packages
+        type: boolean
+        default: true
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: aur-${{ github.event_name == 'pull_request' && github.ref || 'update' }}
+  cancel-in-progress: false
+
+jobs:
+  discover:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      matrix: ${{ steps.packages.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Test shared orchestration and publication safeguards
+        run: python3 -m unittest discover -s tests -v
+      - name: Discover packages
+        id: packages
+        run: python3 scripts/aur.py matrix --github-output "$GITHUB_OUTPUT"
+
+  validate:
+    needs: discover
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.discover.outputs.matrix) }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install archive inspection tools
+        run: |
+          sudo apt-get update --quiet
+          sudo apt-get install --yes --no-install-recommends libarchive-tools
+      - name: Test package safeguards
+        env:
+          PACKAGE: ${{ matrix.package }}
+        run: python3 scripts/aur.py test "$PACKAGE"
+      - name: Check release, AUR synchronization, and monthly validation
+        id: check
+        env:
+          PACKAGE: ${{ matrix.package }}
+          GH_TOKEN: ${{ matrix.package == 'mihomo-smart-bin' && github.token || '' }}
+          FORCE_CHECK: ${{ github.event_name == 'push' || github.event_name == 'pull_request' || (github.event_name == 'workflow_dispatch' && inputs.validate_current) }}
+        run: |
+          args=()
+          if [ "$FORCE_CHECK" = true ]; then args+=(--force); fi
+          python3 scripts/aur.py check "$PACKAGE" --github-output "$GITHUB_OUTPUT" "${args[@]}"
+      - name: Build, install, and exercise the package in Arch Linux
+        if: steps.check.outputs.needed == 'true'
+        env:
+          PACKAGE: ${{ matrix.package }}
+          GH_TOKEN: ${{ matrix.package == 'mihomo-smart-bin' && github.token || '' }}
+        run: python3 scripts/aur.py validate "$PACKAGE" --candidate "$RUNNER_TEMP/candidate-$PACKAGE"
+      - name: Upload validated packaging files
+        if: steps.check.outputs.needed == 'true'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: candidate-${{ matrix.package }}
+          path: |
+            ${{ runner.temp }}/candidate-${{ matrix.package }}/PKGBUILD
+            ${{ runner.temp }}/candidate-${{ matrix.package }}/.SRCINFO
+            ${{ runner.temp }}/candidate-${{ matrix.package }}/LICENSE
+            ${{ runner.temp }}/candidate-${{ matrix.package }}/mihomo-smart-bin.install
+            ${{ runner.temp }}/candidate-${{ matrix.package }}/manifest.json
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 3
+
+  publish:
+    needs: [discover, validate]
+    environment: aur-publish
+    if: >-
+      vars.AUR_PUBLISH_ENABLED == 'true' &&
+      github.repository == 'liblaf/aur' &&
+      github.ref == 'refs/heads/main' &&
+      (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: write
+      actions: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Require a clean publication checkout
+        run: |
+          git_status=$(git status --porcelain --untracked-files=all)
+          test -z "$git_status"
+      - name: Find validated candidates
+        id: candidates
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api --paginate "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/artifacts" \
+            --jq '.artifacts[] | select(.expired == false and (.name | startswith("candidate-"))) | .name' \
+            > "$RUNNER_TEMP/aur-candidate-artifacts"
+          if [ -s "$RUNNER_TEMP/aur-candidate-artifacts" ]; then
+            echo 'found=true' >> "$GITHUB_OUTPUT"
+          else
+            echo 'found=false' >> "$GITHUB_OUTPUT"
+          fi
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        if: steps.candidates.outputs.found == 'true'
+        with:
+          pattern: candidate-*
+          path: ${{ runner.temp }}/candidates
+      - name: Prepare dedicated AUR authentication
+        if: steps.candidates.outputs.found == 'true'
+        env:
+          AUR_SSH_PRIVATE_KEY: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
+        run: |
+          if [ -z "$AUR_SSH_PRIVATE_KEY" ]; then
+            echo 'Configure AUR_SSH_PRIVATE_KEY in the aur-publish environment before publishing.' >&2
+            exit 1
+          fi
+          umask 077
+          printf '%s\n' "$AUR_SSH_PRIVATE_KEY" > "$RUNNER_TEMP/aur-key"
+          public_key=$(ssh-keygen -y -P '' -f "$RUNNER_TEMP/aur-key" | awk '{print $1, $2}')
+          test "$public_key" = "$(awk '{print $1, $2}' "$GITHUB_WORKSPACE/config/aur-actions-key.pub")"
+      - name: Publish validated metadata to AUR and prepare GitHub changes
+        if: steps.candidates.outputs.found == 'true'
+        id: publication
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GIT_LFS_SKIP_PUSH: '1'
+          GIT_SSH_COMMAND: >-
+            ssh -F /dev/null -i "${{ runner.temp }}/aur-key" -o IdentityAgent=none -o BatchMode=yes
+            -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes
+            -o UserKnownHostsFile="${{ github.workspace }}/config/aur-known-hosts"
+            -o ConnectTimeout=15
+        run: python3 scripts/aur.py publish --candidates "$RUNNER_TEMP/candidates" --aur-root "$RUNNER_TEMP/aur" --github-output "$GITHUB_OUTPUT"
+      - name: Remove temporary key
+        if: always()
+        run: |
+          rm -f "$RUNNER_TEMP/aur-key"
+      - name: Prepare GitHub publication branch
+        if: steps.publication.outputs.files != ''
+        id: publication-branch
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api --method POST "repos/$GITHUB_REPOSITORY/git/refs" \
+            -f "ref=refs/heads/aur-automation/$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" \
+            -f "sha=$GITHUB_SHA" > /dev/null
+      - name: Commit validated metadata to GitHub
+        if: steps.publication.outputs.files != ''
+        id: commit
+        uses: suzuki-shunsuke/commit-action@5eaa5ecce3ffe93d09a85b946dc5136e3713b1b7 # v1.1.0
+        with:
+          branch: aur-automation/${{ github.run_id }}-${{ github.run_attempt }}
+          commit_message: 'chore: record AUR package validation [skip ci]'
+          files: ${{ steps.publication.outputs.files }}
+      - name: Publish the verified commit to main
+        if: steps.commit.outputs.pushed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          COMMIT_SHA: ${{ steps.commit.outputs.sha }}
+        run: |
+          test "$(gh api "repos/$GITHUB_REPOSITORY/git/commits/$COMMIT_SHA" --jq '.verification.verified')" = true
+          test "$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq '.object.sha')" = "$GITHUB_SHA"
+          gh api --method PATCH "repos/$GITHUB_REPOSITORY/git/refs/heads/main" \
+            -f "sha=$COMMIT_SHA" -F force=false > /dev/null
+      - name: Remove GitHub publication branch
+        if: always() && steps.publication-branch.outcome == 'success'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api --method DELETE \
+            "repos/$GITHUB_REPOSITORY/git/refs/heads/aur-automation/$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"

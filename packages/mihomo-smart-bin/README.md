@@ -1,11 +1,11 @@
 <div align="center" markdown>
 
-![Mihomo Smart for Arch Linux](https://socialify.git.ci/liblaf/aur-mihomo-smart-bin/image?description=1&forks=1&issues=1&language=1&name=1&owner=1&pattern=Transparent&pulls=1&stargazers=1&theme=Auto)
+![Mihomo Smart for Arch Linux](https://socialify.git.ci/liblaf/aur/image?description=1&forks=1&issues=1&language=1&name=1&owner=1&pattern=Transparent&pulls=1&stargazers=1&theme=Auto)
 
-[![Validate and update Mihomo Smart](https://github.com/liblaf/aur-mihomo-smart-bin/actions/workflows/update.yml/badge.svg)](https://github.com/liblaf/aur-mihomo-smart-bin/actions/workflows/update.yml)
+[![Validate and update Mihomo Smart](https://github.com/liblaf/aur/actions/workflows/packages.yml/badge.svg)](https://github.com/liblaf/aur/actions/workflows/packages.yml)
 [![AUR version](https://img.shields.io/aur/version/mihomo-smart-bin)](https://aur.archlinux.org/packages/mihomo-smart-bin)
 
-[AUR package](https://aur.archlinux.org/packages/mihomo-smart-bin) · [Upstream releases](https://github.com/vernesong/mihomo/releases) · [Workflow runs](https://github.com/liblaf/aur-mihomo-smart-bin/actions/workflows/update.yml)
+[AUR package](https://aur.archlinux.org/packages/mihomo-smart-bin) · [Upstream releases](https://github.com/vernesong/mihomo/releases) · [Workflow runs](https://github.com/liblaf/aur/actions/workflows/packages.yml)
 
 </div>
 
@@ -34,8 +34,8 @@ paru -S mihomo-smart-bin
 Or build as your normal user:
 
 ```bash
-git clone https://github.com/liblaf/aur-mihomo-smart-bin.git
-cd aur-mihomo-smart-bin
+git clone https://github.com/liblaf/aur.git
+cd aur/packages/mihomo-smart-bin
 sudo pacman -S --needed base-devel
 makepkg --syncdeps --install
 ```
@@ -76,14 +76,14 @@ and intervening AUR co-maintainer edits stop publication. New core commits must
 descend from the previous commit, increase the revision count, and retain or
 increase the upstream base version. The publisher checks the AUR commit and
 complete packaging tree against
-[aur-state.json](https://github.com/liblaf/aur-mihomo-smart-bin/blob/main/aur-state.json).
+[aur-state.json](https://github.com/liblaf/aur/blob/main/packages/mihomo-smart-bin/aur-state.json).
 After reviewing an intentional co-maintainer update, reconcile the recipe and
 tracked state before resuming automation. Ordinary pushes never overwrite AUR
 history. If AUR publication succeeds but recording the GitHub commit fails, a
 rerun of the failed publishing job can recover that exact update:
 
 ```bash
-gh run rerun RUN_ID --failed --repo liblaf/aur-mihomo-smart-bin
+gh run rerun RUN_ID --failed --repo liblaf/aur
 ```
 
 Use the failed run's retained artifact for recovery. A fresh run may select a
@@ -94,58 +94,24 @@ their usual AUR upgrade process; installing and restarting a proxy remains a
 separate operation. Upstream deletes older rolling release assets, so old pinned
 recipes may stop downloading once a newer build replaces them.
 
-## Configure publishing
+## Shared publishing
 
-The `aur-publish` GitHub environment must allow only the `main` branch. Its
-`AUR_SSH_PRIVATE_KEY` secret holds a dedicated Ed25519 key whose public half is
-registered on the `liblaf` AUR account. The public half is tracked in
-[config/aur-actions-key.pub](https://github.com/liblaf/aur-mihomo-smart-bin/blob/main/config/aur-actions-key.pub).
+The [repository README](https://github.com/liblaf/aur#shared-aur-identity)
+documents the shared AUR key and `aur-publish` environment. One publication job
+processes the validated packages and records their metadata in one signed GitHub
+commit. AUR export includes only `PKGBUILD`, `.SRCINFO`,
+`mihomo-smart-bin.install`, and `LICENSE`.
 
-Register that public key in the account's AUR SSH key settings, then set the
-matching private key as the environment secret:
-
-```bash
-gh secret set AUR_SSH_PRIVATE_KEY --repo liblaf/aur-mihomo-smart-bin \
-  --env aur-publish < /path/to/dedicated/private-key
-gh variable set AUR_PUBLISH_ENABLED --repo liblaf/aur-mihomo-smart-bin --body true
-gh workflow run update.yml --repo liblaf/aur-mihomo-smart-bin \
-  -f validate_current=true
-```
-
-The private key is never committed. GitHub publication uses the workflow's
-`GITHUB_TOKEN` with `contents: write` and
-[`suzuki-shunsuke/commit-action` v1.1.0](https://github.com/suzuki-shunsuke/commit-action/releases/tag/v1.1.0),
-pinned to commit `5eaa5ecce3ffe93d09a85b946dc5136e3713b1b7`. The AUR key is the
-only publishing secret needed. Validation jobs have no AUR credentials or GitHub
-write token. The publishing job downloads only packaging metadata and never
-executes the downloaded core or a candidate recipe. AUR's server host key is pinned in
-[config/aur-known-hosts](https://github.com/liblaf/aur-mihomo-smart-bin/blob/main/config/aur-known-hosts).
-
-After AUR accepts the update, the workflow creates a unique temporary branch at
-the validated source commit. The action can commit only `PKGBUILD`, `.SRCINFO`,
-`mihomo-smart-bin.install`, `LICENSE`, `aur-state.json`, and
-`automation-validation.json`. The workflow verifies the resulting signature,
-checks that `main` still matches the validated source commit, and advances `main`
-with a non-forced API update. A concurrent update to `main` stops publication;
-the temporary branch is removed on success or failure. The retained artifact
-supports recovery after AUR has accepted the update.
-
-The `main-integrity` ruleset requires verified signatures and forbids force
-pushes, deletion, and branch creation. Main does not require a pull request for
-publication.
-
-Pushes and pull requests run validation without publication. Scheduled and manual
-runs on this repository's `main` branch can publish. Successful monthly validation
-records keep the repository active; GitHub can disable public-repository schedules
-after 60 days without activity if those checks stop succeeding.
-
-Set `AUR_PUBLISH_ENABLED=true` after registering the dedicated public key with
-AUR. Set it to `false` to stop publication while checks and validation continue.
+The package is maintained through the central
+[packages workflow](https://github.com/liblaf/aur/actions/workflows/packages.yml).
+Set `AUR_PUBLISH_ENABLED=false` in `liblaf/aur` to pause AUR writes.
 
 ## Maintain locally
 
 The updater and tests use Python's standard library, Git, and `bsdtar` from
 `libarchive`. Check upstream without changing files, or prepare a verified update:
+
+Run these commands from `packages/mihomo-smart-bin`:
 
 ```bash
 python3 scripts/update.py --check
@@ -173,6 +139,8 @@ makepkg --printsrcinfo > .SRCINFO
 ## License
 
 New maintenance code is licensed under
-[0BSD](https://github.com/liblaf/aur-mihomo-smart-bin/blob/main/LICENSE).
+[MIT](https://github.com/liblaf/aur/blob/main/LICENSE).
+The exported packaging license retains its original
+[0BSD](https://github.com/liblaf/aur/blob/main/packages/mihomo-smart-bin/LICENSE) notice.
 Mihomo Smart is licensed under
 [GPL-3.0-or-later](https://github.com/vernesong/mihomo/blob/Alpha/LICENSE).

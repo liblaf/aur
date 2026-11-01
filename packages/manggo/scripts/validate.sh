@@ -24,7 +24,9 @@ as_builder() {
 }
 
 as_builder python3 -m unittest discover -s tests -v
-as_builder python3 scripts/update.py --update
+if [[ ${SKIP_UPDATE:-0} != 1 ]]; then
+  as_builder python3 scripts/update.py --update
+fi
 cd "$project"
 shellcheck PKGBUILD
 as_builder makepkg --printsrcinfo > /tmp/generated.SRCINFO

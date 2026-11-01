@@ -84,6 +84,27 @@ class PublicationTests(unittest.TestCase):
             return ""
         return self.real_git(directory, *args, env=env)
 
+    def test_nested_package_publication_preserves_staged_sibling(self):
+        repository = self.root
+        nested = repository / "packages/mihomo-smart-bin"
+        nested.mkdir(parents=True)
+        for path in repository.iterdir():
+            if path.is_file():
+                path.rename(nested / path.name)
+        self.commit(repository)
+        self.root = nested
+        self.base = self.run_git(repository, "rev-parse", "HEAD")
+        self.make_candidate()
+        sibling = repository / "packages/manggo"
+        sibling.mkdir()
+        (sibling / "automation-validation.json").write_text("sibling validation\n")
+        self.run_git(repository, "add", "packages/manggo")
+        with patch.object(publish, "ROOT", nested), patch.object(publish, "gh_api", side_effect=self.api):
+            publish.publish(self.candidate, self.aur)
+        self.assertEqual((sibling / "automation-validation.json").read_text(), "sibling validation\n")
+        self.assertEqual(self.run_git(repository, "diff", "--cached", "--name-only"),
+                         "packages/manggo/automation-validation.json")
+
     @staticmethod
     def run_git(path, *args):
         return subprocess.run(("git", "-c", "core.hooksPath=/dev/null", *args), cwd=path, check=True, text=True,

@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: MIT
 """Update the AUR recipe from verified upstream release assets."""
 
 import argparse

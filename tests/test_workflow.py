@@ -8,7 +8,7 @@ import textwrap
 import unittest
 
 
-WORKFLOW = Path(__file__).resolve().parents[1] / ".github/workflows/update.yml"
+WORKFLOW = Path(__file__).resolve().parents[1] / ".github/workflows/packages.yml"
 
 
 def step_script(name):
@@ -44,11 +44,13 @@ class WorkflowPublicationTests(unittest.TestCase):
             with open(os.environ["API_CALLS"], "a") as output:
                 output.write(json.dumps(args) + "\\n")
             if "--method" not in args:
-                path = args[1]
+                path = next(arg for arg in args if arg.startswith("repos/"))
                 if "/git/commits/" in path:
                     print(os.environ["VERIFIED"])
                 elif path.endswith("/git/ref/heads/main"):
                     print(os.environ["MAIN_SHA"])
+                elif "/actions/runs/" in path:
+                    print(os.environ.get("ARTIFACT_NAMES", ""), end="")
                 else:
                     sys.exit("Unexpected GET")
             elif args[args.index("--method") + 1] == "PATCH":
@@ -60,9 +62,12 @@ class WorkflowPublicationTests(unittest.TestCase):
             '''))
         gh.chmod(0o755)
         self.env = os.environ | {"PATH": f"{self.directory}:{os.environ['PATH']}",
-                                 "API_CALLS": str(self.calls), "GITHUB_REPOSITORY": "liblaf/aur-mihomo-smart-bin",
+                                 "API_CALLS": str(self.calls), "GITHUB_REPOSITORY": "liblaf/aur",
                                  "GITHUB_SHA": "a" * 40, "COMMIT_SHA": "b" * 40,
                                  "GITHUB_RUN_ID": "123", "GITHUB_RUN_ATTEMPT": "2",
+                                 "GITHUB_WORKSPACE": str(self.directory),
+                                 "RUNNER_TEMP": str(self.directory),
+                                 "GITHUB_OUTPUT": str(self.directory / "output"),
                                  "VERIFIED": "true", "MAIN_SHA": "a" * 40}
 
     def execute(self, name):
@@ -110,6 +115,65 @@ class WorkflowPublicationTests(unittest.TestCase):
         self.assertIn("POST", call)
         self.assertIn("ref=refs/heads/aur-automation/123-2", call)
         self.assertIn("sha=" + self.env["GITHUB_SHA"], call)
+
+    def test_candidate_discovery_reports_empty_and_available_runs(self):
+        for names, expected in (("", "false"), ("candidate-manggo\ncandidate-mihomo-smart-bin\n", "true")):
+            with self.subTest(names=names):
+                output = Path(self.env["GITHUB_OUTPUT"])
+                output.unlink(missing_ok=True)
+                self.env["ARTIFACT_NAMES"] = names
+                result = self.execute("Find validated candidates")
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(output.read_text(), f"found={expected}\n")
+
+    def test_publication_rejects_untracked_and_staged_changes(self):
+        # The fake API and its output live outside the checkout for this test.
+        checkout = self.directory / "checkout"
+        checkout.mkdir()
+        subprocess.run(("git", "init", "--quiet", str(checkout)), check=True)
+        script = step_script("Require a clean publication checkout")
+
+        def clean_check():
+            return subprocess.run(("bash", "-e", "-o", "pipefail", "-c", script),
+                                  cwd=checkout, env=self.env, capture_output=True)
+
+        self.assertEqual(clean_check().returncode, 0)
+        (checkout / "unexpected").write_text("changed\n")
+        self.assertNotEqual(clean_check().returncode, 0)
+        subprocess.run(("git", "add", "unexpected"), cwd=checkout, check=True)
+        self.assertNotEqual(clean_check().returncode, 0)
+
+    def test_publication_rejects_failed_git_status(self):
+        result = self.execute("Require a clean publication checkout")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("not a git repository", result.stderr)
+
+    def test_dedicated_private_key_must_match_pinned_public_key(self):
+        config = self.directory / "config"
+        config.mkdir()
+        source_key = self.directory / "source-key"
+        subprocess.run(("ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-f", str(source_key)),
+                       check=True, capture_output=True)
+        expected_key = config / "aur-actions-key.pub"
+        expected_key.write_text(source_key.with_suffix(".pub").read_text())
+        self.env["AUR_SSH_PRIVATE_KEY"] = source_key.read_text()
+        result = self.execute("Prepare dedicated AUR authentication")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        temporary_key = self.directory / "aur-key"
+        self.assertEqual(temporary_key.stat().st_mode & 0o777, 0o600)
+        expected_key.write_text("ssh-ed25519 unexpected-key different-comment\n")
+        result = self.execute("Prepare dedicated AUR authentication")
+        self.assertNotEqual(result.returncode, 0)
+        cleanup = self.execute("Remove temporary key")
+        self.assertEqual(cleanup.returncode, 0, cleanup.stderr)
+        self.assertFalse(temporary_key.exists())
+
+    def test_missing_private_key_stops_authentication(self):
+        self.env["AUR_SSH_PRIVATE_KEY"] = ""
+        result = self.execute("Prepare dedicated AUR authentication")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("Configure AUR_SSH_PRIVATE_KEY", result.stderr)
+        self.assertFalse((self.directory / "aur-key").exists())
 
 
 if __name__ == "__main__":

@@ -77,6 +77,13 @@ class PublishTest(unittest.TestCase):
                        stdout=subprocess.DEVNULL)
         run(self.aur, "config", "core.hooksPath", "/dev/null")
         run(self.aur, "checkout", "-B", "master", "origin/master")
+        state = {"commit": run(self.aur, "rev-parse", "HEAD"),
+                 "sha256": {name: publish.sha256(self.aur / name) for name in publish.FILES}}
+        (self.root / "aur-state.json").write_text(json.dumps(state, indent=2, sort_keys=True) + "\n")
+        run(self.root, "add", "aur-state.json")
+        run(self.root, "-c", "user.name=test", "-c", "user.email=test@example.invalid",
+            "commit", "-m", "record AUR baseline")
+        run(self.root, "push", "origin", "main")
         self.candidate = self.base / "candidate"
         self.make_candidate()
         self.old_root = publish.ROOT
@@ -116,7 +123,7 @@ class PublishTest(unittest.TestCase):
         self.assertFalse((self.root / "manifest.json").exists())
 
     def commit_prepared_files(self) -> None:
-        run(self.root, "add", *publish.FILES, "automation-validation.json")
+        run(self.root, "add", *publish.FILES, "automation-validation.json", "aur-state.json")
         run(self.root, "-c", "user.name=test", "-c", "user.email=test@example.invalid",
             "commit", "-m", "emulated commit-action")
         run(self.root, "push", "origin", "main")
@@ -127,6 +134,7 @@ class PublishTest(unittest.TestCase):
         self.assert_github_uncommitted(head)
         self.assertFalse((self.root / "automation-validation.json").exists())
         self.assertEqual(run(self.aur, "log", "-1", "--format=%s"), "Update manggo to 1.0.1")
+        self.assert_aur_state_current()
         for name in publish.FILES:
             self.assertEqual(run(self.aur_remote, "show", f"master:{name}"),
                              (self.candidate / name).read_text().strip())
@@ -168,6 +176,7 @@ class PublishTest(unittest.TestCase):
             publish.publish(self.candidate, self.aur, "main", record_validation=True)
         self.assert_github_uncommitted(head)
         self.assertEqual(run(self.aur_remote, "rev-parse", "master"), aur_head)
+        self.assert_aur_state_current()
         report = json.loads((self.root / "automation-validation.json").read_text())
         self.assertEqual(report["base_commit"], head)
 
@@ -181,6 +190,7 @@ class PublishTest(unittest.TestCase):
         publish.publish(self.candidate, self.aur, "main")
         self.assert_github_uncommitted(head)
         self.assertEqual(run(self.aur_remote, "rev-parse", "master"), aur_head)
+        self.assert_aur_state_current()
 
     def test_same_version_prepares_only_validation_report(self) -> None:
         self.write_pair(self.candidate, PKG, SRC)
@@ -222,7 +232,80 @@ class PublishTest(unittest.TestCase):
         (self.aur / "PKGBUILD").write_text("pkgname=other\n")
         run(self.aur, "add", "PKGBUILD")
         run(self.aur, "-c", "user.name=test", "-c", "user.email=test@example.invalid", "commit", "-m", "manual")
-        with self.assertRaisesRegex(publish.PublishError, "divergent"):
+        run(self.aur, "push", "origin", "master")
+        with self.assertRaisesRegex(publish.PublishError, "co-maintainer"):
+            publish.publish(self.candidate, self.aur, "main")
+
+    def assert_aur_state_current(self) -> None:
+        state = json.loads((self.root / "aur-state.json").read_text())
+        self.assertEqual(state["commit"], run(self.aur_remote, "rev-parse", "master"))
+        self.assertEqual(state["sha256"], {name: publish.sha256(self.candidate / name)
+                                           for name in publish.FILES})
+
+    def test_publishes_merged_github_candidate_from_older_aur_baseline(self) -> None:
+        publish.copy_pair(self.candidate, self.root)
+        run(self.root, "add", *publish.FILES)
+        run(self.root, "-c", "user.name=test", "-c", "user.email=test@example.invalid",
+            "commit", "-m", "accept reviewed release")
+        run(self.root, "push", "origin", "main")
+        manifest = json.loads((self.candidate / "manifest.json").read_text())
+        manifest["base_commit"] = run(self.root, "rev-parse", "HEAD")
+        (self.candidate / "manifest.json").write_text(json.dumps(manifest))
+        self.assertNotEqual(publish.pair(self.root), publish.pair(self.aur))
+        publish.publish(self.candidate, self.aur, "main")
+        self.assertEqual(publish.pair(self.aur), publish.pair(self.candidate))
+        self.assert_aur_state_current()
+
+    def test_rejects_candidate_after_multiple_unrecorded_aur_commits(self) -> None:
+        run(self.aur, "-c", "user.name=test", "-c", "user.email=test@example.invalid",
+            "commit", "--allow-empty", "-m", "co-maintainer change")
+        publish.copy_pair(self.candidate, self.aur)
+        run(self.aur, "add", *publish.FILES)
+        run(self.aur, "-c", "user.name=test", "-c", "user.email=test@example.invalid",
+            "commit", "-m", "matching release")
+        run(self.aur, "push", "origin", "master")
+        original = publish.pair(self.root)
+        with self.assertRaisesRegex(publish.PublishError, "co-maintainer"):
+            publish.publish(self.candidate, self.aur, "main")
+        self.assertEqual(publish.pair(self.root), original)
+
+    def test_rejects_untracked_or_extra_committed_aur_files(self) -> None:
+        (self.aur / "surprise").write_text("unexpected\n")
+        with self.assertRaisesRegex(publish.PublishError, "dirty"):
+            publish.publish(self.candidate, self.aur, "main")
+        run(self.aur, "add", "surprise")
+        run(self.aur, "-c", "user.name=test", "-c", "user.email=test@example.invalid",
+            "commit", "-m", "extra file")
+        run(self.aur, "push", "origin", "master")
+        with self.assertRaisesRegex(publish.PublishError, "unexpected"):
+            publish.publish(self.candidate, self.aur, "main")
+
+    def test_rejects_aur_remote_moving_after_clone(self) -> None:
+        (self.aur_seed / "PKGBUILD").write_text("changed\n")
+        run(self.aur_seed, "add", "PKGBUILD")
+        run(self.aur_seed, "-c", "user.name=test", "-c", "user.email=test@example.invalid",
+            "commit", "-m", "concurrent change")
+        run(self.aur_seed, "push", "origin", "master")
+        with self.assertRaisesRegex(publish.PublishError, "remote moved"):
+            publish.publish(self.candidate, self.aur, "main")
+
+    def test_rejects_tracked_aur_baseline_digest_mismatch(self) -> None:
+        state_path = self.root / "aur-state.json"
+        state = json.loads(state_path.read_text())
+        state["sha256"]["PKGBUILD"] = "0" * 64
+        state_path.write_text(json.dumps(state))
+        with self.assertRaisesRegex(publish.PublishError, "baseline differs"):
+            publish.check_aur(self.aur, {name: publish.sha256(self.candidate / name)
+                                         for name in publish.FILES})
+
+    def test_rejects_nonregular_aur_tree_entry(self) -> None:
+        (self.aur / "PKGBUILD").unlink()
+        (self.aur / "PKGBUILD").symlink_to(".SRCINFO")
+        run(self.aur, "add", "PKGBUILD")
+        run(self.aur, "-c", "user.name=test", "-c", "user.email=test@example.invalid",
+            "commit", "-m", "symlink packaging file")
+        run(self.aur, "push", "origin", "master")
+        with self.assertRaisesRegex(publish.PublishError, "non-regular"):
             publish.publish(self.candidate, self.aur, "main")
 
     def test_rejects_moved_github_main(self) -> None:
@@ -236,6 +319,59 @@ class PublishTest(unittest.TestCase):
         run(other, "push", "origin", "main")
         with self.assertRaisesRegex(publish.PublishError, "moved"):
             publish.publish(self.candidate, self.aur, "main")
+
+    def nest_package(self) -> Path:
+        repository = self.root
+        package = repository / "packages" / "manggo"
+        package.mkdir(parents=True)
+        for name in (*publish.FILES, "aur-state.json"):
+            run(repository, "mv", name, str(package.relative_to(repository) / name))
+        (package / "README.md").write_text("Manggo packaging\n")
+        sibling = repository / "packages" / "other" / "PKGBUILD"
+        sibling.parent.mkdir()
+        sibling.write_text("pkgver=1.0.0\n")
+        run(repository, "add", "packages")
+        run(repository, "-c", "user.name=test", "-c", "user.email=test@example.invalid",
+            "commit", "-m", "centralize packages")
+        run(repository, "push", "origin", "main")
+        manifest = json.loads((self.candidate / "manifest.json").read_text())
+        manifest["base_commit"] = run(repository, "rev-parse", "HEAD")
+        (self.candidate / "manifest.json").write_text(json.dumps(manifest))
+        self.root = package
+        publish.ROOT = package
+        return sibling
+
+    def test_nested_package_preserves_staged_and_unstaged_sibling_changes(self) -> None:
+        sibling = self.nest_package()
+        sibling.write_text("pkgver=1.0.1\n")
+        run(sibling.parent, "add", "PKGBUILD")
+        sibling.write_text("pkgver=1.0.2\n")
+        head = run(self.root, "rev-parse", "HEAD")
+        publish.publish(self.candidate, self.aur, "main")
+        self.assertEqual(run(self.root, "rev-parse", "HEAD"), head)
+        self.assertEqual(sibling.read_text(), "pkgver=1.0.2\n")
+        self.assertEqual(run(sibling.parent, "show", ":packages/other/PKGBUILD"), "pkgver=1.0.1")
+        self.assertEqual(publish.pair(self.root), publish.pair(self.candidate))
+        self.assertEqual(publish.pair(self.aur), publish.pair(self.candidate))
+
+    def test_nested_package_rejects_own_unstaged_changes(self) -> None:
+        self.assert_nested_package_rejects_own_changes(staged=False)
+
+    def test_nested_package_rejects_own_staged_changes(self) -> None:
+        self.assert_nested_package_rejects_own_changes(staged=True)
+
+    def assert_nested_package_rejects_own_changes(self, *, staged: bool) -> None:
+        self.nest_package()
+        original = publish.pair(self.root)
+        aur_head = run(self.aur, "rev-parse", "HEAD")
+        (self.root / "README.md").write_text("Unreviewed packaging changes\n")
+        if staged:
+            run(self.root, "add", "README.md")
+        with self.assertRaisesRegex(publish.PublishError, "git diff"):
+            publish.publish(self.candidate, self.aur, "main")
+        self.assertEqual(publish.pair(self.root), original)
+        self.assertEqual(run(self.aur_remote, "rev-parse", "master"), aur_head)
+        self.assertEqual(run(self.aur, "rev-parse", "HEAD"), aur_head)
 
 
 if __name__ == "__main__":

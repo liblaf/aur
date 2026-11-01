@@ -1,0 +1,48 @@
+name: Verify AUR identity without publishing
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    if: github.repository == 'liblaf/aur' && github.ref == 'refs/heads/main'
+    environment: aur-publish
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Prepare shared AUR identity
+        env:
+          AUR_SSH_PRIVATE_KEY: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
+        run: |
+          umask 077
+          printf '%s\n' "$AUR_SSH_PRIVATE_KEY" > "$RUNNER_TEMP/aur-key"
+          public_key=$(ssh-keygen -y -P '' -f "$RUNNER_TEMP/aur-key" | awk '{print $1, $2}')
+          test "$public_key" = "$(awk '{print $1, $2}' config/aur-actions-key.pub)"
+      - name: Verify account access and read both package refs
+        env:
+          GIT_SSH_COMMAND: >-
+            ssh -F /dev/null -i "${{ runner.temp }}/aur-key"
+            -o IdentityAgent=none -o IdentitiesOnly=yes -o BatchMode=yes
+            -o StrictHostKeyChecking=yes
+            -o UserKnownHostsFile="${{ github.workspace }}/config/aur-known-hosts"
+            -o ConnectTimeout=15
+        run: |
+          ssh -F /dev/null -i "$RUNNER_TEMP/aur-key" \
+            -o IdentityAgent=none -o IdentitiesOnly=yes -o BatchMode=yes \
+            -o StrictHostKeyChecking=yes -o ConnectTimeout=15 \
+            -o UserKnownHostsFile="$GITHUB_WORKSPACE/config/aur-known-hosts" \
+            aur@aur.archlinux.org list-repos > "$RUNNER_TEMP/aur-repositories"
+          cat "$RUNNER_TEMP/aur-repositories"
+          grep -E '^manggo( |$)' "$RUNNER_TEMP/aur-repositories"
+          grep -E '^mihomo-smart-bin( |$)' "$RUNNER_TEMP/aur-repositories"
+          git ls-remote ssh://aur@aur.archlinux.org/manggo.git refs/heads/master
+          git ls-remote ssh://aur@aur.archlinux.org/mihomo-smart-bin.git refs/heads/master
+      - name: Remove temporary key
+        if: always()
+        run: rm -f "$RUNNER_TEMP/aur-key"

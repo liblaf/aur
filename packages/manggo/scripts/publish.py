@@ -161,24 +161,73 @@ def validation_report(version: str, base: str) -> bytes:
     return (json.dumps(report, indent=2, sort_keys=True) + "\n").encode()
 
 
+def tree_hashes(directory: Path, revision: str) -> dict[str, str]:
+    entries = git(directory, "ls-tree", "-r", "-z", "--full-tree", revision).split("\0")
+    result = {}
+    for entry in filter(None, entries):
+        metadata, name = entry.split("\t", 1)
+        mode, kind, _ = metadata.split()
+        if mode != "100644" or kind != "blob" or name not in FILES:
+            raise PublishError("AUR tree contains unexpected or non-regular packaging entry")
+        data = subprocess.run(("git", "show", f"{revision}:{name}"), cwd=directory,
+                              stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False)
+        if data.returncode:
+            raise PublishError("could not read AUR packaging entry")
+        result[name] = hashlib.sha256(data.stdout).hexdigest()
+    if set(result) != set(FILES):
+        raise PublishError("AUR tree must contain exactly the packaging files")
+    return result
+
+
+def check_aur(aur: Path, wanted: dict[str, str]) -> tuple[str, bool]:
+    try:
+        state = json.loads((ROOT / "aur-state.json").read_text())
+    except (OSError, ValueError) as error:
+        raise PublishError(f"invalid tracked AUR state: {error}") from error
+    if (not isinstance(state, dict) or set(state) != {"commit", "sha256"}
+            or not isinstance(state["commit"], str) or not COMMIT.fullmatch(state["commit"])):
+        raise PublishError("invalid tracked AUR state")
+    tracked = state["sha256"]
+    if (not isinstance(tracked, dict) or set(tracked) != set(FILES)
+            or any(not isinstance(value, str) or not DIGEST.fullmatch(value)
+                   for value in tracked.values())):
+        raise PublishError("invalid tracked AUR digests")
+    if git(aur, "status", "--porcelain", "--untracked-files=all"):
+        raise PublishError("AUR checkout is dirty")
+    head = git(aur, "rev-parse", "HEAD")
+    remote = git(aur, "ls-remote", "origin", "HEAD").split()
+    if not remote or remote[0] != head:
+        raise PublishError("AUR remote moved")
+    if tree_hashes(aur, state["commit"]) != tracked:
+        raise PublishError("tracked AUR baseline differs from state")
+    actual = tree_hashes(aur, head)
+    entries = [path for path in aur.iterdir() if path.name != ".git"]
+    if (any(path.is_symlink() or not path.is_file() for path in entries)
+            or {path.name: sha256(path) for path in entries} != actual):
+        raise PublishError("AUR working files differ from committed tree")
+    if head == state["commit"]:
+        return head, actual == wanted
+    parents = git(aur, "rev-list", "--parents", "-n", "1", head).split()[1:]
+    if parents == [state["commit"]] and actual == wanted:
+        return head, True
+    raise PublishError("AUR has untracked co-maintainer changes")
+
+
 def publish(candidate: Path, aur: Path, branch: str, record_validation: bool = False) -> None:
     version, _, _ = validate(candidate)
     if branch != "main" or git(ROOT, "branch", "--show-current") != branch:
         raise PublishError("GitHub checkout must be on main")
-    git(ROOT, "diff", "--quiet")
-    git(ROOT, "diff", "--cached", "--quiet")
+    git(ROOT, "diff", "--quiet", "--", ".")
+    git(ROOT, "diff", "--cached", "--quiet", "--", ".")
     base = git(ROOT, "rev-parse", "HEAD")
     git(ROOT, "fetch", "origin", branch)
     if git(ROOT, "rev-parse", f"origin/{branch}") != base:
         raise PublishError("GitHub main moved since the candidate was created")
-    git(aur, "diff", "--quiet")
-    git(aur, "diff", "--cached", "--quiet")
     report = validation_report(version, base) if record_validation else None
     expected, proposed = pair(ROOT), pair(candidate)
-    actual = pair(aur)
-    if actual not in (expected, proposed):
-        raise PublishError("AUR checkout has divergent package metadata")
-    if actual != proposed:
+    hashes = {name: sha256(candidate / name) for name in FILES}
+    aur_head, already = check_aur(aur, hashes)
+    if not already:
         copy_pair(candidate, aur)
         git(aur, "add", *FILES)
         git(aur, "config", "user.name", "github-actions[bot]")
@@ -187,8 +236,11 @@ def publish(candidate: Path, aur: Path, branch: str, record_validation: bool = F
         push_env = os.environ.copy()
         push_env["GIT_LFS_SKIP_PUSH"] = "1"
         git(aur, "push", "origin", "HEAD:master", env=push_env)
+        aur_head = git(aur, "rev-parse", "HEAD")
     if expected != proposed:
         copy_pair(candidate, ROOT)
+    state = {"commit": aur_head, "sha256": hashes}
+    (ROOT / "aur-state.json").write_text(json.dumps(state, indent=2, sort_keys=True) + "\n")
     if report is not None:
         (ROOT / "automation-validation.json").write_bytes(report)
 
