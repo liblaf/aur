@@ -1,6 +1,6 @@
 {
-  "base_commit": "1f580f357c0a622073bc7e9b86d61a941dbb80bf",
-  "run_url": "https://github.com/liblaf/aur-manggo/actions/runs/40856428417",
-  "validated_at": "2026-10-29T10:19:58.443824Z",
+  "base_commit": "b08d694e1fe0a07a91e6a1cca5e434533ec06955",
+  "run_url": "https://github.com/liblaf/aur/actions/runs/41313240235",
+  "validated_at": "2026-11-01T13:54:19.446050+00:00",
   "version": "1.2.2"
 }
