@@ -9,8 +9,8 @@ The package maintenance histories were imported with `git subtree` on
 | mihomo-smart-bin | `liblaf/aur-mihomo-smart-bin` | `d5478c90b3804db7867f2d987dd16cb5975ae8a2` | `f397a4f2135001e39d25aca4764e366e3f56997c` |
 
 Each package retains its updater, tests, validation script, packaging metadata,
-and historical validation records. Shared workflow and SSH configuration now live
-at the repository root. The shared publisher accepts only declared packaging
+and historical validation records. Shared workflows live in `.github/workflows/`;
+mise and SSH configuration live in `.config/`. The shared publisher accepts only declared packaging
 files and retains each AUR repository's independent history.
 
 The Mihomo import uses the latest remote version,

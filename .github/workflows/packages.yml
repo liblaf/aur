@@ -144,7 +144,7 @@ jobs:
           umask 077
           printf '%s\n' "$AUR_SSH_PRIVATE_KEY" > "$RUNNER_TEMP/aur-key"
           public_key=$(ssh-keygen -y -P '' -f "$RUNNER_TEMP/aur-key" | awk '{print $1, $2}')
-          test "$public_key" = "$(awk '{print $1, $2}' "$GITHUB_WORKSPACE/config/aur-actions-key.pub")"
+          test "$public_key" = "$(awk '{print $1, $2}' "$GITHUB_WORKSPACE/.config/aur-actions-key.pub")"
       - name: Publish validated metadata to AUR and prepare GitHub changes
         if: steps.candidates.outputs.found == 'true'
         id: publication
@@ -156,7 +156,7 @@ jobs:
           GIT_SSH_COMMAND: >-
             ssh -F /dev/null -i "${{ runner.temp }}/aur-key" -o IdentityAgent=none -o BatchMode=yes
             -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes
-            -o UserKnownHostsFile="${{ github.workspace }}/config/aur-known-hosts"
+            -o UserKnownHostsFile="${{ github.workspace }}/.config/aur-known-hosts"
             -o ConnectTimeout=15
         run: |
           if [ "$RECORD_ONLY" = true ]; then

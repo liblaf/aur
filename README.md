@@ -27,8 +27,9 @@ paru -S manggo mihomo-smart-bin
 ## Maintain packages
 
 The helpers use Python's standard library and Git. Arch builds use `makepkg`,
-`bsdtar`, namcap, and ShellCheck inside disposable Docker containers. Install
-`mise` for the task commands:
+`bsdtar`, namcap, and ShellCheck inside disposable Docker containers. Task commands live in
+[.config/mise.toml](https://github.com/liblaf/aur/blob/main/.config/mise.toml)
+and run with `mise`:
 
 ```bash
 mise run test
@@ -70,7 +71,7 @@ regression checks. The workflow discovers the new directory automatically.
 ## Shared AUR identity
 
 The `liblaf` AUR account uses one Ed25519 key for both packages. The public key is
-tracked in [config/aur-actions-key.pub](https://github.com/liblaf/aur/blob/main/config/aur-actions-key.pub):
+tracked in [.config/aur-actions-key.pub](https://github.com/liblaf/aur/blob/main/.config/aur-actions-key.pub):
 
 ```text
 SHA256:j/9lcQVcxP71115YrdkfNEnD6F2g7IfA1N6VaIIt+nk
@@ -91,7 +92,7 @@ mise run publish
 
 Set `AUR_PUBLISH_ENABLED=false` to pause AUR writes while checks continue. The
 workflow verifies the key against the tracked public half and pins AUR's host key
-using [config/aur-known-hosts](https://github.com/liblaf/aur/blob/main/config/aur-known-hosts).
+using [.config/aur-known-hosts](https://github.com/liblaf/aur/blob/main/.config/aur-known-hosts).
 The key is available only in the publication job. GitHub commits use the temporary
 `GITHUB_TOKEN` and the pinned
 [commit-action](https://github.com/suzuki-shunsuke/commit-action).

@@ -23,20 +23,20 @@ jobs:
           umask 077
           printf '%s\n' "$AUR_SSH_PRIVATE_KEY" > "$RUNNER_TEMP/aur-key"
           public_key=$(ssh-keygen -y -P '' -f "$RUNNER_TEMP/aur-key" | awk '{print $1, $2}')
-          test "$public_key" = "$(awk '{print $1, $2}' config/aur-actions-key.pub)"
+          test "$public_key" = "$(awk '{print $1, $2}' .config/aur-actions-key.pub)"
       - name: Verify account access and read both package refs
         env:
           GIT_SSH_COMMAND: >-
             ssh -F /dev/null -i "${{ runner.temp }}/aur-key"
             -o IdentityAgent=none -o IdentitiesOnly=yes -o BatchMode=yes
             -o StrictHostKeyChecking=yes
-            -o UserKnownHostsFile="${{ github.workspace }}/config/aur-known-hosts"
+            -o UserKnownHostsFile="${{ github.workspace }}/.config/aur-known-hosts"
             -o ConnectTimeout=15
         run: |
           ssh -F /dev/null -i "$RUNNER_TEMP/aur-key" \
             -o IdentityAgent=none -o IdentitiesOnly=yes -o BatchMode=yes \
             -o StrictHostKeyChecking=yes -o ConnectTimeout=15 \
-            -o UserKnownHostsFile="$GITHUB_WORKSPACE/config/aur-known-hosts" \
+            -o UserKnownHostsFile="$GITHUB_WORKSPACE/.config/aur-known-hosts" \
             aur@aur.archlinux.org list-repos > "$RUNNER_TEMP/aur-repositories"
           cat "$RUNNER_TEMP/aur-repositories"
           # aurweb prefixes maintained repositories with a space or '*'.

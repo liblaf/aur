@@ -150,7 +150,7 @@ class WorkflowPublicationTests(unittest.TestCase):
         self.assertIn("not a git repository", result.stderr)
 
     def test_dedicated_private_key_must_match_pinned_public_key(self):
-        config = self.directory / "config"
+        config = self.directory / ".config"
         config.mkdir()
         source_key = self.directory / "source-key"
         subprocess.run(("ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-f", str(source_key)),
