@@ -1,5 +1,6 @@
 """Exercise publication ordering and artifact boundaries in a real Git checkout."""
 import importlib.util
+import json
 import os
 from pathlib import Path
 import subprocess
@@ -46,7 +47,7 @@ class SharedPublicationTests(unittest.TestCase):
             return original_run(*args, cwd=self.repository, **kwargs)
         patch.object(aur, "run", side_effect=run).start()
         patch.object(aur, "publisher", side_effect=self.publisher).start()
-        patch.dict(os.environ, GITHUB_REPOSITORY=aur.REPOSITORY,
+        patch.dict(os.environ, GITHUB_REPOSITORY=aur.REPOSITORY, AUR_PUBLISH_ENABLED="true",
                    GIT_SSH_COMMAND="ssh -i /dedicated-key -oIdentitiesOnly=yes").start()
 
     def git(self, *args):
@@ -97,6 +98,28 @@ class SharedPublicationTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "clean repository"):
             aur.publish(self.candidates, self.aur_root)
         self.assertEqual(self.events, [])
+
+    def test_disabled_publication_prevents_even_candidate_processing(self):
+        with patch.dict(os.environ, AUR_PUBLISH_ENABLED="false"):
+            with self.assertRaisesRegex(ValueError, "publication is disabled"):
+                aur.publish(self.candidates, self.aur_root)
+        self.assertEqual(self.events, [])
+
+    def test_record_only_validates_and_copies_without_contacting_aur(self):
+        for name in ("manggo", "mihomo-smart-bin"):
+            candidate = self.candidates / ("candidate-" + name)
+            (candidate / "manifest.json").write_text(json.dumps(
+                {"version": "1.0.0", "base_commit": self.git("rev-parse", "HEAD")}))
+            for filename in ("PKGBUILD", ".SRCINFO"):
+                (candidate / filename).write_text("validated metadata\n")
+        with patch.dict(os.environ, AUR_PUBLISH_ENABLED="false", GITHUB_RUN_ID="123"):
+            files = aur.record(self.candidates).splitlines()
+        self.assertEqual(self.events, [("validate", "manggo"), ("validate", "mihomo-smart-bin")])
+        for name in ("manggo", "mihomo-smart-bin"):
+            root = self.repository / "packages" / name
+            self.assertEqual((root / "PKGBUILD").read_text(), "validated metadata\n")
+            self.assertEqual(json.loads((root / "automation-validation.json").read_text())["version"], "1.0.0")
+            self.assertNotIn(f"packages/{name}/aur-state.json", files)
 
 
 if __name__ == "__main__":

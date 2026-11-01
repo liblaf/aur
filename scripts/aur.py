@@ -10,6 +10,7 @@ import json
 import os
 from pathlib import Path
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -96,23 +97,49 @@ def validate(name: str, candidate: Path) -> None:
     run(*args, "archlinux:base", "bash", "/workspace/scripts/validate.sh")
 
 
+def selected_candidates(candidates: Path) -> list[tuple[str, Path]]:
+    available = {"candidate-" + name: name for name in packages()}
+    entries = sorted(candidates.iterdir())
+    if any(entry.is_symlink() or not entry.is_dir() or entry.name not in available for entry in entries):
+        raise ValueError("Unexpected candidate artifact")
+    selected = [(available[entry.name], entry) for entry in entries]
+    for name, candidate in selected:
+        publisher(name).validate(candidate)
+    return selected
+
+
+def record(candidates: Path) -> str:
+    """Record validated metadata on GitHub without contacting AUR."""
+    selected = selected_candidates(candidates)
+    files = []
+    for name, candidate in selected:
+        module = publisher(name)
+        manifest = json.loads((candidate / "manifest.json").read_text())
+        for filename in module.FILES:
+            shutil.copyfile(candidate / filename, package_path(name) / filename)
+            files.append(f"packages/{name}/{filename}")
+        report = {key: manifest[key] for key in ("base_commit", "version", "pkgrel") if key in manifest}
+        report.update(validated_at=datetime.now(timezone.utc).isoformat(),
+                      run_url=f"https://github.com/{REPOSITORY}/actions/runs/{os.environ['GITHUB_RUN_ID']}")
+        (package_path(name) / "automation-validation.json").write_text(
+            json.dumps(report, indent=2, sort_keys=True) + "\n")
+        files.append(f"packages/{name}/automation-validation.json")
+    return "\n".join(files)
+
+
 def publish(candidates: Path, aur_root: Path) -> str:
     """Prepare every validated package, then let the workflow commit them together."""
+    if os.environ.get("AUR_PUBLISH_ENABLED") != "true":
+        raise ValueError("AUR publication is disabled")
     if os.environ.get("GITHUB_REPOSITORY") != REPOSITORY:
         raise ValueError("Publication requires the trusted GitHub repository")
     if run("git", "status", "--porcelain", "--untracked-files=all", capture=True):
         raise ValueError("Publication requires a clean repository")
     if not os.environ.get("GIT_SSH_COMMAND"):
         raise ValueError("An explicit AUR SSH identity and host configuration are required")
-    available = {"candidate-" + name: name for name in packages()}
-    entries = sorted(candidates.iterdir())
-    if any(entry.is_symlink() or not entry.is_dir() or entry.name not in available for entry in entries):
-        raise ValueError("Unexpected candidate artifact")
-    selected = [(available[entry.name], entry) for entry in entries]
-    # Validate every candidate before the first external write. Individual publishers
+    # Check all candidates before the first external write. Individual publishers
     # additionally verify the remote baseline and support interrupted-publication retries.
-    for name, candidate in selected:
-        publisher(name).validate(candidate)
+    selected = selected_candidates(candidates)
     aur_root.mkdir(parents=True, exist_ok=True)
     files = []
     for name, candidate in selected:
@@ -149,6 +176,9 @@ def main() -> int:
     release.add_argument("--candidates", required=True, type=Path)
     release.add_argument("--aur-root", required=True, type=Path)
     release.add_argument("--github-output", type=Path)
+    report = commands.add_parser("record", help="Record validation on GitHub without AUR publication")
+    report.add_argument("--candidates", required=True, type=Path)
+    report.add_argument("--github-output", type=Path)
     args = parser.parse_args()
     try:
         if args.command == "matrix":
@@ -165,6 +195,8 @@ def main() -> int:
             validate(args.package, args.candidate)
         elif args.command == "publish":
             output(args.github_output, {"files": publish(args.candidates.resolve(), args.aur_root.resolve())})
+        elif args.command == "record":
+            output(args.github_output, {"files": record(args.candidates.resolve())})
     except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as error:
         print(f"aur: {error}", file=sys.stderr)
         return 1

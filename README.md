@@ -96,6 +96,18 @@ The key is available only in the publication job. GitHub commits use the tempora
 `GITHUB_TOKEN` and the pinned
 [commit-action](https://github.com/suzuki-shunsuke/commit-action).
 
+Publication is currently **disabled** while this repository is stabilized. Run a
+complete validation and record its results on GitHub without writing to AUR:
+
+```bash
+gh workflow run packages.yml --repo liblaf/aur \
+  -f validate_current=true -f record_validation=true
+```
+
+`main` requires verified signatures and blocks deletion, creation, and force
+pushes. It accepts signed commits directly so automatic updates can run without
+mandatory pull request approval.
+
 ## License
 
 Copyright © 2026 [liblaf](https://github.com/liblaf). <br />

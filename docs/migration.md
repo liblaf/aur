@@ -39,6 +39,12 @@ The shared key is registered to AUR and stored as the central repository's
 remote refs through read-only SSH commands. It can run while publication is
 disabled.
 
+The destination's inherited mandatory pull request review rule was removed to
+support automatic signed updates. Its verified-signature, deletion, creation,
+and force-push protections remain, including the existing administrator
+exception. This policy applies to all writers of this repository. The shared
+workflow also checks the signature and source SHA before advancing `main`.
+
 After the repository is stable, enable automatic AUR publication only with the
 maintainer's confirmation:
 

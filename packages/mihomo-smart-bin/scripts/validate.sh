@@ -122,14 +122,15 @@ with log.open('w') as output:
             try:
                 with urllib.request.urlopen('http://127.0.0.1:18090/version', timeout=1) as response:
                     version = json.load(response)
+                # The controller serves /version before proxy configuration is ready.
+                with urllib.request.urlopen('http://127.0.0.1:18090/proxies/SMART', timeout=1) as response:
+                    group = json.load(response)
                 break
             except (OSError, urllib.error.URLError):
                 time.sleep(0.1)
         else:
-            raise RuntimeError('Mihomo controller did not start: ' + log.read_text())
+            raise RuntimeError('Mihomo Smart group did not become ready: ' + log.read_text())
         assert version['version'] == 'alpha-smart-' + commit, version
-        with urllib.request.urlopen('http://127.0.0.1:18090/proxies/SMART', timeout=2) as response:
-            group = json.load(response)
         assert group['type'].lower() == 'smart', group
         print('Validated Smart group through the installed core controller.')
     finally:

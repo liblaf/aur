@@ -10,6 +10,10 @@ on:
         description: Validate and synchronize the current packages
         type: boolean
         default: true
+      record_validation:
+        description: Record validated metadata on GitHub without publishing to AUR
+        type: boolean
+        default: false
   push:
     branches: [main]
   pull_request:
@@ -91,10 +95,11 @@ jobs:
     needs: [discover, validate]
     environment: aur-publish
     if: >-
-      vars.AUR_PUBLISH_ENABLED == 'true' &&
       github.repository == 'liblaf/aur' &&
       github.ref == 'refs/heads/main' &&
-      (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
+      ((vars.AUR_PUBLISH_ENABLED == 'true' &&
+        (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')) ||
+       (github.event_name == 'workflow_dispatch' && inputs.record_validation))
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     permissions:
@@ -128,7 +133,7 @@ jobs:
           pattern: candidate-*
           path: ${{ runner.temp }}/candidates
       - name: Prepare dedicated AUR authentication
-        if: steps.candidates.outputs.found == 'true'
+        if: steps.candidates.outputs.found == 'true' && inputs.record_validation != true
         env:
           AUR_SSH_PRIVATE_KEY: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
         run: |
@@ -145,13 +150,20 @@ jobs:
         id: publication
         env:
           GH_TOKEN: ${{ github.token }}
+          RECORD_ONLY: ${{ inputs.record_validation || false }}
+          AUR_PUBLISH_ENABLED: ${{ vars.AUR_PUBLISH_ENABLED }}
           GIT_LFS_SKIP_PUSH: '1'
           GIT_SSH_COMMAND: >-
             ssh -F /dev/null -i "${{ runner.temp }}/aur-key" -o IdentityAgent=none -o BatchMode=yes
             -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes
             -o UserKnownHostsFile="${{ github.workspace }}/config/aur-known-hosts"
             -o ConnectTimeout=15
-        run: python3 scripts/aur.py publish --candidates "$RUNNER_TEMP/candidates" --aur-root "$RUNNER_TEMP/aur" --github-output "$GITHUB_OUTPUT"
+        run: |
+          if [ "$RECORD_ONLY" = true ]; then
+            python3 scripts/aur.py record --candidates "$RUNNER_TEMP/candidates" --github-output "$GITHUB_OUTPUT"
+          else
+            python3 scripts/aur.py publish --candidates "$RUNNER_TEMP/candidates" --aur-root "$RUNNER_TEMP/aur" --github-output "$GITHUB_OUTPUT"
+          fi
       - name: Remove temporary key
         if: always()
         run: |

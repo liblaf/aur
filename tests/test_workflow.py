@@ -3,6 +3,7 @@ import json
 import os
 from pathlib import Path
 import subprocess
+import sys
 import tempfile
 import textwrap
 import unittest
@@ -174,6 +175,51 @@ class WorkflowPublicationTests(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("Configure AUR_SSH_PRIVATE_KEY", result.stderr)
         self.assertFalse((self.directory / "aur-key").exists())
+
+    def stub_driver(self):
+        commands = self.directory / "driver-commands.jsonl"
+        python = self.directory / "python3"
+        python.write_text(f"#!{sys.executable}\n" + textwrap.dedent('''\
+            import json
+            import os
+            import sys
+            with open(os.environ["DRIVER_COMMANDS"], "a") as output:
+                output.write(json.dumps(sys.argv[1:]) + "\\n")
+            if sys.argv[2] == "publish" and os.environ["AUR_PUBLISH_ENABLED"] != "true":
+                sys.exit("AUR publishing is disabled")
+            sys.exit(int(os.environ.get("DRIVER_STATUS", "0")))
+            '''))
+        python.chmod(0o755)
+        self.env["DRIVER_COMMANDS"] = str(commands)
+        return commands
+
+    def test_record_only_mode_records_metadata_with_aur_publishing_disabled(self):
+        commands = self.stub_driver()
+        self.env.update(RECORD_ONLY="true", AUR_PUBLISH_ENABLED="false")
+        result = self.execute("Publish validated metadata to AUR and prepare GitHub changes")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual([json.loads(line) for line in commands.read_text().splitlines()], [[
+            "scripts/aur.py", "record", "--candidates", str(self.directory / "candidates"),
+            "--github-output", self.env["GITHUB_OUTPUT"],
+        ]])
+        self.assertFalse((self.directory / "aur-key").exists())
+
+    def test_record_failure_stops_without_falling_back_to_aur_publication(self):
+        commands = self.stub_driver()
+        self.env.update(RECORD_ONLY="true", AUR_PUBLISH_ENABLED="false", DRIVER_STATUS="1")
+        result = self.execute("Publish validated metadata to AUR and prepare GitHub changes")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual([json.loads(line)[1] for line in commands.read_text().splitlines()], ["record"])
+
+    def test_normal_publication_mode_uses_aur_driver(self):
+        commands = self.stub_driver()
+        self.env.update(RECORD_ONLY="false", AUR_PUBLISH_ENABLED="true")
+        result = self.execute("Publish validated metadata to AUR and prepare GitHub changes")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual([json.loads(line) for line in commands.read_text().splitlines()], [[
+            "scripts/aur.py", "publish", "--candidates", str(self.directory / "candidates"),
+            "--aur-root", str(self.directory / "aur"), "--github-output", self.env["GITHUB_OUTPUT"],
+        ]])
 
 
 if __name__ == "__main__":

@@ -39,8 +39,9 @@ jobs:
             -o UserKnownHostsFile="$GITHUB_WORKSPACE/config/aur-known-hosts" \
             aur@aur.archlinux.org list-repos > "$RUNNER_TEMP/aur-repositories"
           cat "$RUNNER_TEMP/aur-repositories"
-          grep -E '^manggo( |$)' "$RUNNER_TEMP/aur-repositories"
-          grep -E '^mihomo-smart-bin( |$)' "$RUNNER_TEMP/aur-repositories"
+          # aurweb prefixes maintained repositories with a space or '*'.
+          # Co-maintained repositories are omitted from list-repos.
+          grep -E '^[ *]manggo$' "$RUNNER_TEMP/aur-repositories"
           git ls-remote ssh://aur@aur.archlinux.org/manggo.git refs/heads/master
           git ls-remote ssh://aur@aur.archlinux.org/mihomo-smart-bin.git refs/heads/master
       - name: Remove temporary key
