@@ -188,7 +188,7 @@ GitHub does not atomically replace an asset; a short database 404 is possible du
 
 Retain current packages, at least two superseded versions per output, and superseded files for a seven-day grace period. Keep older binaries in their publication archives for recovery. Preflight the retention inventory against GitHub's limit of 1,000 assets per release; each archive plus detached signature uses two slots. Each asset must be under 2 GiB. GitHub documents no aggregate release-size or bandwidth quota. If the retention inventory cannot fit, stop with a capacity report before modifying the working repository. [Release limits](https://docs.github.com/en/repositories/releasing-projects-on-github/about-releases)
 
-**AUR export remains a separate operation for our maintained recipes.** `aurpublish` can export each maintained package directory as its own AUR Git history. Imported AUR recipes have no export action. A failed AUR export can be retried independently, with synchronization state recorded separately from binary publication. [aurpublish](https://github.com/eli-schwartz/aurpublish)
+**AUR export remains a separate operation for our maintained recipes.** The guarded Git publisher exports declared packaging files to each package's independent AUR repository and verifies its tracked baseline. Imported AUR recipes have no export action. A failed AUR export can be retried independently, with synchronization state recorded separately from binary publication.
 
 **The initial tool stack stays small.**
 
@@ -200,7 +200,7 @@ Retain current packages, at least two superseded versions per output, and supers
 | Builds and checks | Fresh Arch containers, `makepkg`, namcap, ShellCheck, package checks |
 | Version and repository metadata | `vercmp`, `repo-add`, `repo-remove` |
 | Binary signatures and GitHub publication | GnuPG, GitHub CLI/API |
-| Optional export to AUR | aurpublish |
+| Optional export to AUR | Guarded Git publisher and declared file lists |
 | Catalog, locks, reconciliation, and manifests | A small Python CI layer |
 
 The Python layer implements our catalog and publication policy while the Arch tools perform package work. `repoctl` can remain a local convenience. ahriman and lilac become alternatives if the project later adopts a broader build service and wants that service to own orchestration.

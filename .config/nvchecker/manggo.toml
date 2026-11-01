@@ -1,0 +1,3 @@
+[manggo]
+source = "cmd"
+cmd = 'python3 "$AUR_VERSION_ADAPTER" hook --package manggo'

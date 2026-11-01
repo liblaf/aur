@@ -57,7 +57,7 @@ For each update, the workflow:
    checks again that upstream metadata stayed stable during the download.
 3. Reads the upstream Mihomo version from the package metadata, verifies the
    complete Git history and revision count, and regenerates `.SRCINFO` with `makepkg`.
-4. Builds and installs the package in a disposable Arch Linux container, checks
+4. Builds the package with devtools in a clean Arch chroot and installs the resulting archive in a fresh container, checks
    that local config edits survive reinstallation, validates a Smart configuration,
    and queries a running Smart group through its controller.
 5. Publishes only validated packaging files to AUR in a separate job, then records
@@ -117,7 +117,7 @@ Run these commands from `packages/mihomo-smart-bin`:
 python3 scripts/update.py --check
 python3 scripts/update.py --update
 python3 -m unittest discover -s tests -v
-shellcheck PKGBUILD scripts/validate.sh
+mise run lint mihomo-smart-bin
 git diff -- PKGBUILD .SRCINFO
 ```
 

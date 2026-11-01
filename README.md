@@ -26,8 +26,8 @@ paru -S manggo mihomo-smart-bin
 
 ## Maintain packages
 
-The helpers use Python's standard library and Git. Arch builds use `makepkg`,
-`bsdtar`, namcap, and ShellCheck inside disposable Docker containers. Task commands live in
+The helpers use Python's standard library and Docker. A shared Arch image provides
+devtools, pkgctl, nvchecker, namcap, ShellCheck, and actionlint. Task commands live in
 [.config/mise.toml](https://github.com/liblaf/aur/blob/main/.config/mise.toml)
 and run with `mise`:
 
@@ -35,14 +35,30 @@ and run with `mise`:
 mise run test
 mise run check manggo
 mise run update mihomo-smart-bin
+mise run build mihomo-smart-bin
+mise run lint
+mise run smoke mihomo-smart-bin
 mise run validate mihomo-smart-bin
 mise run publish
 ```
 
-`mise run publish` dispatches the GitHub workflow. Local validation writes metadata
-under `.candidates/`. For a local build, enter the package directory and run
-`makepkg --syncdeps --install` as your normal user. See each package's README for
-runtime checks and upstream details.
+`check` discovers releases; `update` prepares changes in staging and copies them
+back after verification. `build` builds the current recipe with devtools in a clean
+Arch chroot and saves a manifest, exact package archives, recipe, and verified
+sources under `.artifacts/<package>/`. `lint` checks recipes, shell hooks, and
+workflows without building. `smoke` verifies the saved artifact hashes, installs
+those archives, runs namcap, and exercises the installed package.
+
+`validate` runs update, source verification, clean build, and smoke checks together,
+then writes only validated AUR metadata under `.candidates/`. `SKIP_UPDATE=1`
+validates the current pinned recipe. `publish` dispatches the GitHub workflow.
+See each package's README for runtime checks and upstream details.
+
+The shared image is cached by configuration and UTC day; no host package installation
+is required. Clean builds require Docker support for privileged containers and
+nested systemd-nspawn. Runtime checks run in separate unprivileged containers.
+GitHub credentials are supplied only to the metadata preparation process, which
+exits before build and runtime stages begin.
 
 ## Automation
 
@@ -52,7 +68,9 @@ releases, AUR differences, and compatibility checks due after 28 days. Pushes an
 pull requests also build packages. A manual run validates both current packages.
 
 Each package retains its upstream validation rules and regression tests. Builds
-run in parallel with read access. One publication job checks the candidate
+run in parallel with devtools; GUI and Smart-controller hooks consume the resulting
+archives. Manggo also checks ARM64 repackaging on x86_64; native ARM64 runtime is
+not covered. One publication job checks the candidate
 manifests, source commit, allowed recipe changes, and current AUR state, then
 publishes each selected package. It records all results together in one signed
 GitHub commit and advances `main` only if the validated source commit is still
@@ -63,10 +81,27 @@ and documentation stay in this repository. Existing AUR histories and
 co-maintainer edits are checked before publication. Retained candidate artifacts
 allow a failed publication job to retry an interrupted update.
 
-To add a package, create `packages/<pkgbase>/` with `PKGBUILD`, `.SRCINFO`, and
-the same `scripts/update.py`, `scripts/validate.sh`, `scripts/publish.py` interfaces.
-Declare the exported files in the publisher's `FILES` tuple and include package
-regression checks. The workflow discovers the new directory automatically.
+Declare each package in
+[.config/packages.toml](https://github.com/liblaf/aur/blob/main/.config/packages.toml).
+For an ordinary release package, add `packages/<pkgbase>/PKGBUILD`, `.SRCINFO`,
+and a native `.nvchecker.toml` beside the recipe, then declare its AUR files:
+
+```toml
+[packages.example]
+export_files = ["PKGBUILD", ".SRCINFO"]
+```
+
+The default checker is `pkgctl version check`; the default updater is
+`pkgctl version upgrade`, followed by `.SRCINFO` generation. Package-local
+`.nvchecker.toml` is the native pkgctl convention. Shared configuration stays in
+`.config/`. Manggo and Mihomo declare specialized discovery/update hooks through
+nvchecker, retaining their download, archive, digest, and history verification.
+Optional smoke hooks exercise installed applications after the common checks.
+
+The workflow discovers declared package directories automatically. Conventional
+candidates can be validated and recorded on GitHub without custom scripts. AUR
+publication additionally requires a configured publisher with a tracked AUR
+baseline. Existing publishers' file lists must match the catalog declarations.
 
 ## Shared AUR identity
 

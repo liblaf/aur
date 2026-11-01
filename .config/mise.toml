@@ -16,10 +16,24 @@ run = 'python3 scripts/aur.py check "${usage_package:?}"'
 [tasks.update]
 description = "Download and validate upstream assets, then regenerate package metadata"
 usage = 'arg "<package>"'
-run = 'python3 "packages/${usage_package:?}/scripts/update.py" --update'
+run = 'python3 scripts/aur.py update "${usage_package:?}"'
+
+[tasks.build]
+description = "Build the current recipe with devtools in a clean Arch chroot"
+usage = 'arg "<package>"'
+run = 'python3 scripts/aur.py build "${usage_package:?}" --output ".artifacts/${usage_package:?}"'
+
+[tasks.lint]
+description = "Check recipes, shell scripts, and workflows with namcap, ShellCheck, and actionlint"
+run = 'python3 scripts/aur.py lint'
+
+[tasks.smoke]
+description = "Install and exercise the existing clean-build artifacts"
+usage = 'arg "<package>"'
+run = 'python3 scripts/aur.py smoke "${usage_package:?}" --artifacts ".artifacts/${usage_package:?}"'
 
 [tasks.validate]
-description = "Build, install, and exercise a package in disposable Arch Linux"
+description = "Update, clean-build, lint, and exercise a package in disposable Arch Linux"
 usage = 'arg "<package>"'
 run = 'python3 scripts/aur.py validate "${usage_package:?}" --candidate ".candidates/${usage_package:?}"'
 

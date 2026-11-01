@@ -17,6 +17,8 @@ import tempfile
 
 ROOT = Path(__file__).resolve().parents[1]
 REPOSITORY = "liblaf/aur"
+sys.path.insert(0, str(ROOT))
+from scripts import pipeline
 
 
 def run(*args: str, cwd: Path = ROOT, capture: bool = False) -> str:
@@ -40,9 +42,14 @@ def package_path(name: str) -> Path:
 
 def publisher(name: str):
     path = package_path(name) / "scripts/publish.py"
+    config = pipeline.spec(name, ROOT)
+    if not path.exists():
+        return pipeline.CandidatePolicy(ROOT, name, config["export_files"])
     spec = importlib.util.spec_from_file_location("publish_" + name.replace("-", "_"), path)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
+    if set(module.FILES) != set(config["export_files"]):
+        raise ValueError(f"Publisher and catalog export files differ for {name}")
     return module
 
 
@@ -61,10 +68,7 @@ def check(name: str, force: bool = False) -> dict[str, str]:
     root = package_path(name)
     with tempfile.TemporaryDirectory(prefix="aur-check-") as temporary:
         directory = Path(temporary)
-        release = directory / "release"
-        run(sys.executable, str(root / "scripts/update.py"), "--check",
-            "--github-output", str(release))
-        fields = dict(line.split("=", 1) for line in release.read_text().splitlines())
+        fields = pipeline.version(name, "check", ROOT)
         aur = directory / "aur"
         run("git", "-c", "core.hooksPath=/dev/null", "clone", "--quiet",
             "--depth", "1", f"https://aur.archlinux.org/{name}.git", str(aur))
@@ -84,17 +88,11 @@ def check(name: str, force: bool = False) -> dict[str, str]:
 
 
 def validate(name: str, candidate: Path) -> None:
-    root = package_path(name)
-    candidate = candidate.resolve()
-    candidate.mkdir(parents=True, exist_ok=True)
-    base = os.environ.get("GITHUB_SHA") or run("git", "rev-parse", "HEAD", capture=True)
-    args = ["docker", "run", "--rm", "--volume", f"{root}:/workspace:ro",
-            "--volume", f"{candidate}:/candidate", "--env", f"BASE_COMMIT={base}"]
-    if name == "mihomo-smart-bin":
-        args += ["--env", "GH_TOKEN"]
-    if os.environ.get("SKIP_UPDATE") == "1":
-        args += ["--env", "SKIP_UPDATE=1"]
-    run(*args, "archlinux:base", "bash", "/workspace/scripts/validate.sh")
+    pipeline.container(pipeline.tool_image(), "lint", name)
+    with tempfile.TemporaryDirectory(prefix="aur-validated-") as directory:
+        artifact = Path(directory) / "build"
+        pipeline.build(name, artifact, update=os.environ.get("SKIP_UPDATE") != "1")
+        pipeline.smoke(name, artifact, candidate)
 
 
 def selected_candidates(candidates: Path) -> list[tuple[str, Path]]:
@@ -140,6 +138,8 @@ def publish(candidates: Path, aur_root: Path) -> str:
     # Check all candidates before the first external write. Individual publishers
     # additionally verify the remote baseline and support interrupted-publication retries.
     selected = selected_candidates(candidates)
+    if any(isinstance(publisher(name), pipeline.CandidatePolicy) for name, _ in selected):
+        raise ValueError("AUR publication requires a configured package publisher and baseline")
     aur_root.mkdir(parents=True, exist_ok=True)
     files = []
     for name, candidate in selected:
@@ -172,6 +172,16 @@ def main() -> int:
     build = commands.add_parser("validate", help="Build and exercise a package in disposable Arch Linux")
     build.add_argument("package", choices=packages())
     build.add_argument("--candidate", required=True, type=Path)
+    update = commands.add_parser("update", help="Prepare a transactional package update")
+    update.add_argument("package", choices=packages())
+    clean_build = commands.add_parser("build", help="Build the current recipe in a devtools clean chroot")
+    clean_build.add_argument("package", choices=packages())
+    clean_build.add_argument("--output", required=True, type=Path)
+    smoke = commands.add_parser("smoke", help="Install and test existing clean-build artifacts")
+    smoke.add_argument("package", choices=packages())
+    smoke.add_argument("--artifacts", required=True, type=Path)
+    lint = commands.add_parser("lint", help="Run ShellCheck, namcap, and actionlint without building")
+    lint.add_argument("package", nargs="?", choices=packages())
     release = commands.add_parser("publish", help="Publish validated candidates with the shared AUR key")
     release.add_argument("--candidates", required=True, type=Path)
     release.add_argument("--aur-root", required=True, type=Path)
@@ -182,6 +192,8 @@ def main() -> int:
     args = parser.parse_args()
     try:
         if args.command == "matrix":
+            for name in packages():
+                pipeline.spec(name, ROOT)
             output(args.github_output, {"matrix": json.dumps({"package": packages()})})
         elif args.command == "test":
             if args.package is None:
@@ -193,6 +205,14 @@ def main() -> int:
             output(args.github_output, check(args.package, args.force))
         elif args.command == "validate":
             validate(args.package, args.candidate)
+        elif args.command == "update":
+            pipeline.version(args.package, "update", ROOT)
+        elif args.command == "build":
+            pipeline.build(args.package, args.output)
+        elif args.command == "smoke":
+            pipeline.smoke(args.package, args.artifacts)
+        elif args.command == "lint":
+            pipeline.container(pipeline.tool_image(), "lint", *([args.package] if args.package else packages()))
         elif args.command == "publish":
             output(args.github_output, {"files": publish(args.candidates.resolve(), args.aur_root.resolve())})
         elif args.command == "record":

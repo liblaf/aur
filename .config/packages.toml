@@ -1,0 +1,13 @@
+# Packages use pkgctl by default. Special upstream formats keep verified hooks.
+[packages.manggo]
+export_files = ["PKGBUILD", ".SRCINFO"]
+update_hook = "scripts/update.py"
+nvchecker = ".config/nvchecker/manggo.toml"
+smoke_hook = "scripts/smoke.sh"
+smoke_dependencies = ["desktop-file-utils", "patchelf", "xorg-server-xvfb", "xorg-xwininfo", "ttf-dejavu"]
+
+[packages.mihomo-smart-bin]
+export_files = ["PKGBUILD", ".SRCINFO", "mihomo-smart-bin.install", "LICENSE"]
+update_hook = "scripts/update.py"
+nvchecker = ".config/nvchecker/mihomo-smart-bin.toml"
+smoke_hook = "scripts/smoke.sh"

@@ -28,7 +28,7 @@ concurrency:
 jobs:
   discover:
     runs-on: ubuntu-24.04
-    timeout-minutes: 5
+    timeout-minutes: 10
     outputs:
       matrix: ${{ steps.packages.outputs.matrix }}
     steps:
@@ -37,6 +37,8 @@ jobs:
           persist-credentials: false
       - name: Test shared orchestration and publication safeguards
         run: python3 -m unittest discover -s tests -v
+      - name: Lint recipes, shell hooks, and workflows with Arch tools
+        run: python3 scripts/aur.py lint
       - name: Discover packages
         id: packages
         run: python3 scripts/aur.py matrix --github-output "$GITHUB_OUTPUT"
@@ -81,12 +83,7 @@ jobs:
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: candidate-${{ matrix.package }}
-          path: |
-            ${{ runner.temp }}/candidate-${{ matrix.package }}/PKGBUILD
-            ${{ runner.temp }}/candidate-${{ matrix.package }}/.SRCINFO
-            ${{ runner.temp }}/candidate-${{ matrix.package }}/LICENSE
-            ${{ runner.temp }}/candidate-${{ matrix.package }}/mihomo-smart-bin.install
-            ${{ runner.temp }}/candidate-${{ matrix.package }}/manifest.json
+          path: ${{ runner.temp }}/candidate-${{ matrix.package }}/
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 3
