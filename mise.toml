@@ -1,0 +1,28 @@
+#:schema https://mise.jdx.dev/schema/mise.json
+
+[tasks.default]
+description = "List available maintenance tasks"
+run = "mise tasks --no-global"
+
+[tasks.test]
+description = "Run shared and package regression checks"
+run = "python3 scripts/aur.py test"
+
+[tasks.check]
+description = "Check upstream releases, AUR synchronization, and validation age"
+usage = 'arg "<package>"'
+run = 'python3 scripts/aur.py check "${usage_package:?}"'
+
+[tasks.update]
+description = "Download and validate upstream assets, then regenerate package metadata"
+usage = 'arg "<package>"'
+run = 'python3 "packages/${usage_package:?}/scripts/update.py" --update'
+
+[tasks.validate]
+description = "Build, install, and exercise a package in disposable Arch Linux"
+usage = 'arg "<package>"'
+run = 'python3 scripts/aur.py validate "${usage_package:?}" --candidate ".candidates/${usage_package:?}"'
+
+[tasks.publish]
+description = "Run the complete shared publishing workflow on GitHub"
+run = "gh workflow run packages.yml --repo liblaf/aur -f validate_current=true"

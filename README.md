@@ -28,17 +28,17 @@ paru -S manggo mihomo-smart-bin
 
 The helpers use Python's standard library and Git. Arch builds use `makepkg`,
 `bsdtar`, namcap, and ShellCheck inside disposable Docker containers. Install
-`just` for the command shortcuts:
+`mise` for the task commands:
 
 ```bash
-just test
-just check manggo
-just update mihomo-smart-bin
-just validate mihomo-smart-bin
-just publish
+mise run test
+mise run check manggo
+mise run update mihomo-smart-bin
+mise run validate mihomo-smart-bin
+mise run publish
 ```
 
-`just publish` dispatches the GitHub workflow. Local validation writes metadata
+`mise run publish` dispatches the GitHub workflow. Local validation writes metadata
 under `.candidates/`. For a local build, enter the package directory and run
 `makepkg --syncdeps --install` as your normal user. See each package's README for
 runtime checks and upstream details.
@@ -86,7 +86,7 @@ environment secret, and verifying publication before retiring the old key:
 gh secret set AUR_SSH_PRIVATE_KEY --repo liblaf/aur \
   --env aur-publish < ~/.ssh/id_ed25519_aur
 gh variable set AUR_PUBLISH_ENABLED --repo liblaf/aur --body true
-just publish
+mise run publish
 ```
 
 Set `AUR_PUBLISH_ENABLED=false` to pause AUR writes while checks continue. The
