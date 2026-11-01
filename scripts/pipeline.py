@@ -157,14 +157,15 @@ def verify_bundle(directory: Path, name: str) -> dict:
     if not archives or len(set(archives)) != len(archives):
         raise ValueError("Missing or duplicate package archives")
     info = read_srcinfo((directory / "recipe/.SRCINFO").read_text())
-    prefixes = {f"{package}-{info['pkgver'][0]}-{info['pkgrel'][0]}-{arch}.pkg.tar"
-                for package in info["pkgname"] for arch in info["arch"]}
+    prefixes = archive_prefixes(info)
     for filename in archives:
         if not safe_name(filename).startswith("packages/") or filename not in actual:
             raise ValueError("Package archive is outside the package output directory")
-        if not any(Path(filename).name == prefix or re.fullmatch(re.escape(prefix) + r"\.[A-Za-z0-9]+", Path(filename).name)
-                   for prefix in prefixes):
+        if not matches_archive(Path(filename).name, prefixes):
             raise ValueError("Package archive filename differs from the recipe outputs")
+    for package in info["pkgname"]:
+        if not any(matches_archive(Path(f).name, archive_prefixes(info, {package})) for f in archives):
+            raise ValueError("Missing required recipe archive in build bundle")
     return manifest
 
 
@@ -248,6 +249,28 @@ def read_srcinfo(text: str) -> dict[str, list[str]]:
             key, value = line.strip().split(" = ", 1)
             result.setdefault(key, []).append(value)
     return result
+
+
+def implicit_debug_name(info: dict[str, list[str]]) -> str | None:
+    if {"!debug", "!strip"}.intersection(info.get("options", [])):
+        return None
+    name = info["pkgbase"][0] + "-debug"
+    return name if name not in info["pkgname"] else None
+
+
+def archive_prefixes(info: dict[str, list[str]], names: set[str] | None = None) -> set[str]:
+    if names is None:
+        names = set(info["pkgname"])
+        debug = implicit_debug_name(info)
+        if debug:
+            names.add(debug)
+    return {f"{package}-{info['pkgver'][0]}-{info['pkgrel'][0]}-{arch}.pkg.tar"
+            for package in names for arch in info["arch"]}
+
+
+def matches_archive(filename: str, prefixes: set[str]) -> bool:
+    return any(filename == prefix or re.fullmatch(re.escape(prefix) + r"\.[A-Za-z0-9]+", filename)
+               for prefix in prefixes)
 
 
 class CandidatePolicy:
@@ -334,23 +357,34 @@ def namcap(*paths: Path) -> None:
             raise RuntimeError(f"namcap rejected {path.name}")
 
 
-def inside_build_report(name: str) -> None:
-    work = Path("/work")
+def inside_build_report(name: str, work: Path = Path("/work")) -> None:
     info = read_srcinfo((work / "project/.SRCINFO").read_text())
     expected_version = info["pkgver"][0] + "-" + info["pkgrel"][0]
     if info.get("epoch", ["0"])[0] != "0":
         expected_version = info["epoch"][0] + ":" + expected_version
     archives = []
+    seen = set()
+    debug = implicit_debug_name(info)
+    expected_names = set(info["pkgname"]) | ({debug} if debug else set())
+    optional_debug = archive_prefixes(info, {debug}) if debug else set()
     for line in (work / "package-files").read_text().splitlines():
         path = Path(line)
-        if not path.is_file() or path.is_symlink() or path.parent != work / "packages":
+        if path.is_symlink() or path.parent != work / "packages":
             raise ValueError("Unexpected devtools package output")
+        # makepkg lists the optional debug package even when there were no ELF
+        # debug symbols to package. Required recipe outputs must always exist.
+        if not path.exists() and matches_archive(path.name, optional_debug):
+            continue
+        if not path.is_file():
+            raise ValueError("Missing required devtools package output")
         metadata = read_srcinfo(command("bsdtar", "-xOf", str(path), ".PKGINFO", capture=True))
-        if metadata.get("pkgname", [None])[0] not in info["pkgname"] or metadata.get("pkgver") != [expected_version]:
+        pkgname = metadata.get("pkgname", [None])[0]
+        if pkgname not in expected_names or metadata.get("pkgver") != [expected_version]:
             raise ValueError("Built package identity differs from .SRCINFO")
+        seen.add(pkgname)
         archives.append(path.name)
-    if not archives:
-        raise ValueError("devtools did not produce a package")
+    if not set(info["pkgname"]).issubset(seen):
+        raise ValueError("devtools did not produce every required package")
     (work / "build-report.json").write_text(json.dumps(archives) + "\n")
 
 

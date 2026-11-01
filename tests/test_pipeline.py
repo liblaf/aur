@@ -119,6 +119,16 @@ class ArtifactTests(PipelineFixture):
         self.seal_bundle(bundle, ["packages/fixture-1.0.tar.gz"])
         self.assert_rejected_before_container(bundle)
 
+    def test_implicit_debug_archive_is_a_valid_additional_output(self):
+        bundle = self.bundle()
+        debug = "packages/fixture-debug-1.0-1-any.pkg.tar.zst"
+        (bundle / debug).write_bytes(b"detached debug symbols")
+        self.seal_bundle(bundle, ["packages/fixture-1.0-1-any.pkg.tar.zst", debug])
+        self.assertEqual(len(pipeline.verify_bundle(bundle, "fixture")["archives"]), 2)
+        self.seal_bundle(bundle, [debug])
+        with self.assertRaisesRegex(ValueError, "Missing required"):
+            pipeline.verify_bundle(bundle, "fixture")
+
     def test_symlink_in_bundle_is_rejected_before_smoke(self):
         bundle = self.bundle()
         outside = self.directory / "outside"
@@ -340,6 +350,31 @@ class ContainerBoundaryTests(PipelineFixture):
                 with self.assertRaises(ValueError):
                     pipeline.inside_smoke("fixture")
                 command.assert_not_called()
+
+
+class DebugOutputTests(PipelineFixture):
+    def test_optional_debug_output_can_be_present_or_absent(self):
+        for produced in (False, True):
+            with self.subTest(produced=produced):
+                work = self.directory / f"work-{produced}"
+                shutil.copytree(self.recipe, work / "project")
+                (work / "packages").mkdir()
+                regular = work / "packages/fixture-1.0-1-any.pkg.tar.zst"
+                debug = work / "packages/fixture-debug-1.0-1-any.pkg.tar.zst"
+                regular.write_bytes(b"main")
+                if produced:
+                    debug.write_bytes(b"debug")
+                (work / "package-files").write_text(f"{regular}\n{debug}\n")
+                def metadata(*args, **kwargs):
+                    pkgname = "fixture-debug" if Path(args[2]) == debug else "fixture"
+                    return f"pkgname = {pkgname}\npkgver = 1.0-1\n"
+                with patch.object(pipeline, "command", side_effect=metadata):
+                    pipeline.inside_build_report("fixture", work)
+                self.assertEqual(json.loads((work / "build-report.json").read_text()),
+                                 [regular.name, debug.name] if produced else [regular.name])
+                regular.unlink()
+                with self.assertRaisesRegex(ValueError, "Missing required"):
+                    pipeline.inside_build_report("fixture", work)
 
 
 if __name__ == "__main__":

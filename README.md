@@ -26,7 +26,7 @@ paru -S manggo mihomo-smart-bin
 
 ## Maintain packages
 
-The helpers use Python's standard library and Docker. A shared Arch image provides
+The helpers use Python's standard library, Git, and Docker. A shared Arch image provides
 devtools, pkgctl, nvchecker, namcap, ShellCheck, and actionlint. Task commands live in
 [.config/mise.toml](https://github.com/liblaf/aur/blob/main/.config/mise.toml)
 and run with `mise`:
@@ -54,8 +54,8 @@ then writes only validated AUR metadata under `.candidates/`. `SKIP_UPDATE=1`
 validates the current pinned recipe. `publish` dispatches the GitHub workflow.
 See each package's README for runtime checks and upstream details.
 
-The shared image is cached by configuration and UTC day; no host package installation
-is required. Clean builds require Docker support for privileged containers and
+The shared image is cached by configuration and UTC day. Arch tooling is installed
+in that image. Clean builds require Docker support for privileged containers and
 nested systemd-nspawn. Runtime checks run in separate unprivileged containers.
 GitHub credentials are supplied only to the metadata preparation process, which
 exits before build and runtime stages begin.
