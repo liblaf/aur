@@ -45,9 +45,21 @@ every package that builds and passes its tests is pushed to the AUR. Updated
 recipes are then committed back to this repository. One failing package does
 not block the others.
 
-Publishing requires the `AUR_PUBLISH_ENABLED` repository variable set to `true`
-and the `AUR_SSH_PRIVATE_KEY` secret in the `aur-publish` environment. The
-matching public key is [`.config/aur-actions-key.pub`](.config/aur-actions-key.pub).
+To pause all automation (upstream checks, builds, AUR publishing, and
+commits back), disable the workflow; enable it to resume:
+
+```bash
+gh workflow disable aur.yml --repo liblaf/aur
+gh workflow enable aur.yml --repo liblaf/aur
+```
+
+While it is disabled, nothing runs, including builds for pushes and pull
+requests. After re-enabling, the next run on `main` publishes any changes made
+in the meantime.
+
+Publishing uses the `AUR_SSH_PRIVATE_KEY` secret in the `aur-publish`
+environment. The matching public key is
+[`.config/aur-actions-key.pub`](.config/aur-actions-key.pub).
 
 ## Local tasks
 

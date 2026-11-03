@@ -111,7 +111,7 @@ jobs:
             echo EOF
           } >> "$GITHUB_OUTPUT"
       - name: Publish to the AUR
-        if: vars.AUR_PUBLISH_ENABLED == 'true' && steps.packages.outputs.names != ''
+        if: steps.packages.outputs.names != ''
         env:
           AUR_SSH_PRIVATE_KEY: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
           NAMES: ${{ steps.packages.outputs.names }}
