@@ -1,4 +1,11 @@
 __pycache__/
-.pytest_cache/
-/.candidates/
-/.artifacts/
+# makepkg output when building in a package directory
+packages/*/src/
+packages/*/pkg/
+packages/*/*.pkg.tar*
+packages/*/*.log
+packages/*/*.tar.*
+packages/*/*.deb
+packages/*/*.bin
+packages/*/*.ico
+packages/*/*.png

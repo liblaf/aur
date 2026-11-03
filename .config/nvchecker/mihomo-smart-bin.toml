@@ -1,3 +1,0 @@
-[mihomo-smart-bin]
-source = "cmd"
-cmd = 'python3 "$AUR_VERSION_ADAPTER" hook --package mihomo-smart-bin'

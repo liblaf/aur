@@ -1,42 +1,55 @@
 #:schema https://mise.jdx.dev/schema/mise.json
 
-[tasks.default]
-description = "List available maintenance tasks"
-run = "mise tasks --no-global"
-
-[tasks.test]
-description = "Run shared and package regression checks"
-run = "python3 scripts/aur.py test"
-
-[tasks.check]
-description = "Check upstream releases, AUR synchronization, and validation age"
-usage = 'arg "<package>"'
-run = 'python3 scripts/aur.py check "${usage_package:?}"'
+[tools]
+"aqua:rhysd/actionlint" = "latest"
+shellcheck = "latest"
 
 [tasks.update]
-description = "Download and validate upstream assets, then regenerate package metadata"
-usage = 'arg "<package>"'
-run = 'python3 scripts/aur.py update "${usage_package:?}"'
+description = "Check upstream and update PKGBUILD/.SRCINFO (all packages by default)"
+usage = 'arg "[package]" var=#true'
+run = 'python3 scripts/update.py ${usage_package:-}'
 
-[tasks.build]
-description = "Build the current recipe with devtools in a clean Arch chroot"
-usage = 'arg "<package>"'
-run = 'python3 scripts/aur.py build "${usage_package:?}" --output ".artifacts/${usage_package:?}"'
+[tasks.srcinfo]
+description = "Regenerate .SRCINFO for every package"
+run = 'for dir in packages/*/; do (cd "$dir" && makepkg --printsrcinfo > .SRCINFO); done'
 
 [tasks.lint]
-description = "Check recipes, shell scripts, and workflows with namcap, ShellCheck, and actionlint"
-run = 'python3 scripts/aur.py lint'
+description = "Lint recipes, scripts, and workflows"
+run = '''
+set -e
+for dir in packages/*/; do
+  (cd "$dir" && makepkg --printsrcinfo | diff -u .SRCINFO -)
+  if command -v namcap > /dev/null; then namcap "$dir/PKGBUILD"; fi
+done
+shellcheck --shell=bash --exclude=SC2034,SC2154 packages/*/PKGBUILD
+shellcheck scripts/*.sh
+actionlint
+'''
 
-[tasks.smoke]
-description = "Install and exercise the existing clean-build artifacts"
+[tasks.build]
+description = "Build and smoke-test a package in a disposable Arch Linux container"
 usage = 'arg "<package>"'
-run = 'python3 scripts/aur.py smoke "${usage_package:?}" --artifacts ".artifacts/${usage_package:?}"'
-
-[tasks.validate]
-description = "Update, clean-build, lint, and exercise a package in disposable Arch Linux"
-usage = 'arg "<package>"'
-run = 'python3 scripts/aur.py validate "${usage_package:?}" --candidate ".candidates/${usage_package:?}"'
+run = '''
+sources="${XDG_CACHE_HOME:-$HOME/.cache}/aur-sources"
+mkdir -p "$sources"
+docker run --rm -v "$PWD:/repo:ro" -v "$sources:/sources" -w /repo -e PACKAGE="${usage_package:?}" \
+  archlinux:base-devel bash -euo pipefail -c '
+  pacman -Syu --noconfirm --needed namcap >/dev/null
+  useradd --create-home builder
+  echo "builder ALL=(ALL) NOPASSWD: ALL" > /etc/sudoers.d/builder
+  install -d -o builder /home/builder/out && chown builder /sources
+  cp -r "packages/$PACKAGE" /home/builder/recipe && chown -R builder: /home/builder/recipe
+  cd /home/builder/recipe
+  sudo -u builder env SRCDEST=/sources PKGDEST=/home/builder/out makepkg --syncdeps --noconfirm --cleanbuild
+  cd /repo
+  pacman -U --noconfirm /home/builder/out/*.pkg.tar.zst
+  # pydepends misreads bundled interpreters (Faceform Wrap ships Python 3.8).
+  namcap -e pydepends /home/builder/out/*.pkg.tar.zst | tee /tmp/namcap.log
+  if grep " E: " /tmp/namcap.log; then exit 1; fi
+  bash scripts/smoke.sh "$PACKAGE"
+'
+'''
 
 [tasks.publish]
-description = "Run the complete shared publishing workflow on GitHub"
-run = "gh workflow run packages.yml --repo liblaf/aur -f validate_current=true"
+description = "Run the GitHub workflow: check upstream, build, test, and publish"
+run = "gh workflow run aur.yml --repo liblaf/aur"
