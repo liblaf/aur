@@ -26,6 +26,10 @@ these are prebuilt binaries, so the package takes the `-bin` suffix.
 
 [non-free package guidelines]: https://wiki.archlinux.org/title/Nonfree_applications_package_guidelines
 
+Command names follow upstream, including capitalization and suffixes. Faceform
+Wrap provides `Wrap.sh` and `WrapCmd.sh` on `PATH`; its desktop entry uses `Wrap.sh`.
+Manggo's command is `Manggo`.
+
 ## Layout
 
 - `packages/<name>/`: exactly the files published to the AUR, with the package

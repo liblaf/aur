@@ -18,7 +18,12 @@ no_missing_libraries() {
 
 case "${name}" in
   faceform-wrap)
-    output=$(cd /tmp && as_user QT_QPA_PLATFORM=offscreen WRAPCMD_NO_OPENGL=1 faceform-wrap-cmd --version 2>&1)
+    for launcher in Wrap.sh WrapCmd.sh; do
+      launcher_path=$(command -v "${launcher}")
+      [[ -x "${launcher_path}" ]]
+      printf '%s -> %s\n' "${launcher_path}" "$(readlink -f "${launcher_path}")"
+    done
+    output=$(cd /tmp && as_user QT_QPA_PLATFORM=offscreen WRAPCMD_NO_OPENGL=1 WrapCmd.sh --version 2>&1)
     echo "${output}"
     [[ "${output}" == *"Wrap ${pkgver}"* ]]
     [[ "${output}" != *"Could not find platform"* ]]
@@ -27,6 +32,9 @@ case "${name}" in
       no_missing_libraries /usr/lib/faceform-wrap/{Wrap,WrapCmd,WrapServer,plugins}
     ;;
   manggo)
+    launcher_path=$(as_user sh -c 'command -v Manggo')
+    [[ -x "${launcher_path}" ]]
+    printf '%s -> %s\n' "${launcher_path}" "$(readlink -f "${launcher_path}")"
     no_missing_libraries /usr/lib/manggo
     ;;
   mihomo-smart-bin)
