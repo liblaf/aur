@@ -39,6 +39,8 @@ jobs:
           persist-credentials: false
       - name: Hand the checkout to the build user
         run: chown -R builder:builder .
+      - name: Test the updater
+        run: python3 -m unittest discover -s tests
       - name: Check upstream for a new release
         if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
         env:
@@ -126,17 +128,19 @@ jobs:
             bash scripts/publish.sh "$name" || failed=1
           done
           exit "$failed"
+      # Save tested updates even when publishing another package failed.
       # main requires signed commits, so commit through the GitHub API on a
       # temporary branch and fast-forward main only if it has not moved.
       - name: Create a temporary branch
-        if: steps.packages.outputs.files != ''
+        id: branch
+        if: ${{ !cancelled() && steps.packages.outcome == 'success' && steps.packages.outputs.files != '' }}
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh api --method POST "repos/$GITHUB_REPOSITORY/git/refs" \
             -f "ref=refs/heads/aur-update/$GITHUB_RUN_ID" -f "sha=$GITHUB_SHA" > /dev/null
       - name: Commit updated packages
-        if: steps.packages.outputs.files != ''
+        if: ${{ !cancelled() && steps.branch.outcome == 'success' }}
         id: commit
         uses: suzuki-shunsuke/commit-action@5eaa5ecce3ffe93d09a85b946dc5136e3713b1b7 # v1.1.0
         with:
@@ -144,7 +148,7 @@ jobs:
           commit_message: 'chore: update AUR packages [skip ci]'
           files: ${{ steps.packages.outputs.files }}
       - name: Fast-forward main
-        if: steps.commit.outputs.pushed == 'true'
+        if: ${{ !cancelled() && steps.commit.outcome == 'success' && steps.commit.outputs.pushed == 'true' }}
         env:
           GH_TOKEN: ${{ github.token }}
           COMMIT_SHA: ${{ steps.commit.outputs.sha }}
@@ -152,7 +156,7 @@ jobs:
           gh api --method PATCH "repos/$GITHUB_REPOSITORY/git/refs/heads/main" \
             -f "sha=$COMMIT_SHA" -F force=false > /dev/null
       - name: Delete the temporary branch
-        if: always() && steps.packages.outputs.files != ''
+        if: always() && steps.branch.outcome == 'success'
         env:
           GH_TOKEN: ${{ github.token }}
         run: gh api --method DELETE "repos/$GITHUB_REPOSITORY/git/refs/heads/aur-update/$GITHUB_RUN_ID" || true

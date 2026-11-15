@@ -24,6 +24,7 @@ done
 shellcheck --shell=bash --exclude=SC2034,SC2154 packages/*/PKGBUILD
 shellcheck scripts/*.sh
 actionlint
+python3 -m unittest discover -s tests
 '''
 
 [tasks.build]

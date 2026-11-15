@@ -15,6 +15,7 @@ import subprocess
 import sys
 import tempfile
 import urllib.error
+import urllib.parse
 import urllib.request
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -40,9 +41,14 @@ def run(*args: str, cwd: Path | None = None) -> str:
 def manggo(current: dict[str, str]) -> dict[str, str]:
     data = get_json("https://manggo.pylogmon.cn/api/v1/public/homepage?locale=en")
     items = next(s["download"]["items"] for s in data["data"]["sections"] if s.get("type") == "download")
-    versions = {item["version"].removeprefix("v") for item in items
-                if item.get("platform") == "Linux" and item.get("systemRequirements") == "deb"
-                and item.get("architecture") in ("x64", "arm64")}
+    versions = set()
+    for item in items:
+        if item.get("platform") != "Linux" or item.get("architecture") not in ("x64", "arm64"):
+            continue
+        target = item.get("target", {})
+        url = target.get("href") or target.get("externalUrl", "")
+        if urllib.parse.urlsplit(url).path.endswith(".deb"):
+            versions.add(item["version"].removeprefix("v"))
     if len(versions) != 1:
         raise RuntimeError(f"expected one Manggo Linux version, found {sorted(versions)}")
     return {"pkgver": versions.pop()}

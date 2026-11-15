@@ -2,7 +2,7 @@
 
 pkgname=faceform-wrap
 pkgver=2025.11.14
-pkgrel=1
+pkgrel=3
 # Opaque path component of the versioned download URL; updated with pkgver.
 _download_id=9f99598ca4cd3b373d0b26a450d9a47d
 pkgdesc='Topology transfer tool that fits a base mesh to 3D scans'
