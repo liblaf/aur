@@ -8,8 +8,10 @@ from scripts import update
 
 def deb_download(architecture="x64", version="1.2.2"):
     file_arch = {"x64": "amd64", "arm64": "arm64"}[architecture]
-    url = (f"https://gitcode.com/Pylogmon/Manggo/releases/download/{version}/"
-           f"manggo_{version}_{file_arch}.deb")
+    url = (
+        f"https://gitcode.com/Pylogmon/Manggo/releases/download/{version}/"
+        f"manggo_{version}_{file_arch}.deb"
+    )
     return {
         "platform": "Linux",
         "architecture": architecture,
@@ -21,7 +23,9 @@ def deb_download(architecture="x64", version="1.2.2"):
 
 class ManggoReleaseTests(TestCase):
     def discover(self, *items):
-        data = {"data": {"sections": [{"type": "download", "download": {"items": items}}]}}
+        data = {
+            "data": {"sections": [{"type": "download", "download": {"items": items}}]}
+        }
         with patch.object(update, "get_json", return_value=data):
             return update.manggo({"pkgver": "1.2.2"})
 

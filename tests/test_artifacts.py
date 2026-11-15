@@ -1,12 +1,11 @@
 """Exercise recipe artifacts with offline staging, ZIP extraction and application."""
 
 import os
-from pathlib import Path
 import subprocess
+from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest import TestCase
 from zipfile import ZipFile
-
 
 SCRIPTS = Path(__file__).resolve().parents[1] / "scripts"
 
@@ -21,17 +20,30 @@ class PackageArtifactTests(TestCase):
             self.write_recipe(self.checkout, name, "old")
         self.git("init", "--quiet")
         self.git("add", "packages")
-        self.git("-c", "user.name=Test", "-c", "user.email=test@example.com",
-                 "-c", "commit.gpgsign=false", "-c", "core.hooksPath=/dev/null",
-                 "commit", "--quiet", "--message=Initial recipes")
+        self.git(
+            "-c",
+            "user.name=Test",
+            "-c",
+            "user.email=test@example.com",
+            "-c",
+            "commit.gpgsign=false",
+            "-c",
+            "core.hooksPath=/dev/null",
+            "commit",
+            "--quiet",
+            "--message=Initial recipes",
+        )
         self.runner_temp = self.root / "release-temp"
         self.download = self.runner_temp / "packages"
         self.output = self.root / "github-output"
 
     def git(self, *arguments):
         return subprocess.run(
-            ["git", *arguments], cwd=self.checkout, check=True,
-            capture_output=True, text=True,
+            ["git", *arguments],
+            cwd=self.checkout,
+            check=True,
+            capture_output=True,
+            text=True,
         )
 
     def write_recipe(self, checkout, name, version):
@@ -51,9 +63,12 @@ class PackageArtifactTests(TestCase):
         contents = self.write_recipe(build, name, "tested")
         build_temp = self.root / f"temp-{name}"
         subprocess.run(
-            ["bash", str(SCRIPTS / "stage-package.sh"), name], cwd=build,
-            env={**os.environ, "RUNNER_TEMP": str(build_temp)}, check=True,
-            capture_output=True, text=True,
+            ["bash", str(SCRIPTS / "stage-package.sh"), name],
+            cwd=build,
+            env={**os.environ, "RUNNER_TEMP": str(build_temp)},
+            check=True,
+            capture_output=True,
+            text=True,
         )
         staging = build_temp / "artifacts"
         archive_path = self.root / f"package-{name}.zip"
@@ -73,10 +88,15 @@ class PackageArtifactTests(TestCase):
 
     def apply(self):
         return subprocess.run(
-            ["bash", str(SCRIPTS / "apply-packages.sh")], cwd=self.checkout,
-            env={**os.environ, "RUNNER_TEMP": str(self.runner_temp),
-                 "GITHUB_OUTPUT": str(self.output)},
-            capture_output=True, text=True,
+            ["bash", str(SCRIPTS / "apply-packages.sh")],
+            cwd=self.checkout,
+            env={
+                **os.environ,
+                "RUNNER_TEMP": str(self.runner_temp),
+                "GITHUB_OUTPUT": str(self.output),
+            },
+            capture_output=True,
+            text=True,
         )
 
     def assert_applied(self, recipes):
@@ -96,11 +116,15 @@ class PackageArtifactTests(TestCase):
 
     def test_single_faceform_archive_preserves_wrapper_and_srcinfo(self):
         self.assert_applied({"faceform-wrap": self.stage_and_download("faceform-wrap")})
-        self.assertIn("pkgver=old", (self.checkout / "packages/manggo/PKGBUILD").read_text())
+        self.assertIn(
+            "pkgver=old", (self.checkout / "packages/manggo/PKGBUILD").read_text()
+        )
 
     def test_two_archives_merge_and_apply_their_own_recipes(self):
         # Download order does not determine the package names output order.
-        recipes = {name: self.stage_and_download(name) for name in ("manggo", "faceform-wrap")}
+        recipes = {
+            name: self.stage_and_download(name) for name in ("manggo", "faceform-wrap")
+        }
         self.assert_applied(recipes)
 
     def test_empty_artifact_set_fails_instead_of_succeeding_without_packages(self):
@@ -117,13 +141,18 @@ class PackageArtifactTests(TestCase):
         result = self.apply()
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("expected PKGBUILD and .SRCINFO", result.stderr)
-        self.assertIn("pkgver=old", (self.checkout / "packages/faceform-wrap/PKGBUILD").read_text())
+        self.assertIn(
+            "pkgver=old",
+            (self.checkout / "packages/faceform-wrap/PKGBUILD").read_text(),
+        )
         self.assertFalse(self.output.exists())
 
     def test_unknown_package_fails(self):
         self.stage_and_download("unknown-package")
         result = self.apply()
         self.assertNotEqual(result.returncode, 0)
-        self.assertIn("unknown-package: no package directory in the checkout", result.stderr)
+        self.assertIn(
+            "unknown-package: no package directory in the checkout", result.stderr
+        )
         self.assertFalse((self.checkout / "packages/unknown-package").exists())
         self.assertFalse(self.output.exists())
