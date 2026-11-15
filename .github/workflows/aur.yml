@@ -42,7 +42,7 @@ jobs:
       - name: Test the updater
         run: python3 -m unittest discover -s tests
       - name: Check upstream for a new release
-        if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+        if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || matrix.package == 'mihomo-smart-bin'
         env:
           GH_TOKEN: ${{ github.token }}
         run: sudo -u builder --preserve-env=GH_TOKEN python3 scripts/update.py "$PACKAGE"
@@ -65,10 +65,12 @@ jobs:
           namcap -e pydepends /tmp/out/*.pkg.tar.zst | tee /tmp/namcap.log
           if grep " E: " /tmp/namcap.log; then exit 1; fi
           bash scripts/smoke.sh "$PACKAGE"
+      - name: Stage tested package files
+        run: bash scripts/stage-package.sh "$PACKAGE"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: package-${{ matrix.package }}
-          path: packages/${{ matrix.package }}/
+          path: ${{ runner.temp }}/artifacts/
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 7
@@ -95,23 +97,12 @@ jobs:
         with:
           pattern: package-*
           path: ${{ runner.temp }}/packages
+          merge-multiple: true
       - name: Apply tested package files
         id: packages
         run: |
           git config --global --add safe.directory "$GITHUB_WORKSPACE"
-          shopt -s nullglob
-          names=()
-          for artifact in "$RUNNER_TEMP"/packages/package-*; do
-            name=${artifact##*/package-}
-            cp -a "$artifact/." "packages/$name/"
-            names+=("$name")
-          done
-          echo "names=${names[*]}" >> "$GITHUB_OUTPUT"
-          {
-            echo 'files<<EOF'
-            git status --porcelain -- packages | cut -c4-
-            echo EOF
-          } >> "$GITHUB_OUTPUT"
+          bash scripts/apply-packages.sh
       - name: Publish to the AUR
         if: steps.packages.outputs.names != ''
         env:
