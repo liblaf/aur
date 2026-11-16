@@ -23,7 +23,7 @@ jobs:
       matrix:
         package: [faceform-wrap, manggo, mihomo-smart-bin]
     runs-on: ubuntu-24.04
-    container: archlinux:base-devel
+    container: archlinux:base-devel@sha256:fa2d4ce3310ddd90a4208e5168be8ad367da5129af1245f38fd2d803bcbe3239
     timeout-minutes: 60
     env:
       PACKAGE: ${{ matrix.package }}
@@ -82,7 +82,7 @@ jobs:
       always() && github.repository == 'liblaf/aur' && github.ref == 'refs/heads/main' &&
       github.event_name != 'pull_request'
     runs-on: ubuntu-24.04
-    container: archlinux:base
+    container: archlinux:base@sha256:d4594bb2300cba11f41c2f27923eb56f63d9988909c402f9c95517d1e362c899
     environment: aur-publish
     timeout-minutes: 15
     permissions:
